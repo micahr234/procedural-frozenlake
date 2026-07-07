@@ -16,14 +16,14 @@ import pygame  # noqa: E402
 
 from procedural_frozenlake.tile_icons import (  # noqa: E402
     TILE_GLARE,
-    TILE_LAND,
     TILE_SLEIGH,
+    TILE_TREE,
     build_native_tile_icons,
 )
 
 OUT_DIR = os.path.join(ROOT, "src", "procedural_frozenlake", "img")
 NAMES = {
-    TILE_LAND: "tree.png",
+    TILE_TREE: "tree.png",
     TILE_GLARE: "glare_ice.png",
     TILE_SLEIGH: "sleigh.png",
 }

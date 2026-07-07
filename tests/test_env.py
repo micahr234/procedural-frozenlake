@@ -45,6 +45,25 @@ def test_random_map_is_lazy_until_reset() -> None:
         env.close()
 
 
+def test_fog_of_war_defaults_on() -> None:
+    env = ProceduralFrozenLakeEnv(map_seed=0)
+    try:
+        assert env.fog_of_war
+    finally:
+        env.close()
+
+
+def test_map_info_emitted_every_reset_and_step() -> None:
+    env = ProceduralFrozenLakeEnv(map_seed=1, emit_map=True)
+    try:
+        _, first = env.reset(seed=1)
+        _, _, _, _, step_info = env.step(0)
+        _, second = env.reset(seed=2)
+        assert first["map"] == step_info["map"] == second["map"]
+    finally:
+        env.close()
+
+
 def test_can_regenerate_map_on_reset() -> None:
     env = gym.make(
         PROCEDURAL_FROZENLAKE_ENV_ID,
@@ -130,7 +149,7 @@ def test_q_star_matches_compute_q_table() -> None:
 
 
 def test_q_star_prefers_progress_with_zero_step_penalty() -> None:
-    """Default q_star epsilon should beat wall-bumping when step_penalty is zero."""
+    """Default q_star_gamma discounting should beat wall-bumping when step_penalty is zero."""
     env = ProceduralFrozenLakeEnv(
         fixed_map=["SFG"],
         step_penalty=0.0,
@@ -146,28 +165,27 @@ def test_q_star_prefers_progress_with_zero_step_penalty() -> None:
         env.close()
 
 
-def test_q_star_step_penalty_decoupled_from_env_step_penalty() -> None:
+def test_q_star_gamma_controls_discounting() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=["SFG"],
-        step_penalty=-0.5,
-        q_star_step_penalty=-0.01,
+        q_star_gamma=0.5,
         emit_q_star=True,
     )
     try:
         env.reset(seed=0)
         q = env.compute_q_table()
-        assert env._q_star_step_penalty == -0.01
-        assert env._step_penalty == -0.5
-        q_with_env_penalty = ProceduralFrozenLakeEnv(
-            fixed_map=["SFG"],
-            step_penalty=-0.5,
-            emit_q_star=True,
-        )
-        q_with_env_penalty.reset(seed=0)
-        assert not np.allclose(q, q_with_env_penalty.compute_q_table())
+        # Two steps to the goal from S: 0.5^1 * 1.0; one step from F: 1.0.
+        assert q[0, 2] == pytest.approx(0.5)
+        assert q[1, 2] == pytest.approx(1.0)
     finally:
         env.close()
-        q_with_env_penalty.close()
+
+
+def test_q_star_gamma_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="q_star_gamma"):
+        ProceduralFrozenLakeEnv(q_star_gamma=0.0)
+    with pytest.raises(ValueError, match="q_star_gamma"):
+        ProceduralFrozenLakeEnv(q_star_gamma=1.5)
 
 
 def test_same_map_is_reused_without_regenerate_option() -> None:
@@ -319,11 +337,11 @@ def test_canvas_is_always_max_size() -> None:
 def test_obs_indexing_uses_max_width_stride() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "LSFFF",
-            "LFFGF",
-            "LFFFF",
-            "LFFFF",
-            "LFFFF",
+            "TSFFF",
+            "TFFGF",
+            "TFFFF",
+            "TFFFF",
+            "TFFFF",
         ],
         emit_map=True,
     )
@@ -340,8 +358,8 @@ def test_obs_indexing_uses_max_width_stride() -> None:
 def test_land_tiles_are_impassable() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SLFFF",
-            "LFFFF",
+            "STFFF",
+            "TFFFF",
             "FFFFG",
         ],
         emit_map=True,
@@ -369,7 +387,7 @@ def test_generated_maps_include_land() -> None:
     try:
         env.reset(seed=0)
         board = "".join(env._gridmap or [])
-        assert "L" in board
+        assert "T" in board
         assert "S" in board
         assert "G" in board
     finally:
@@ -379,8 +397,8 @@ def test_generated_maps_include_land() -> None:
 def test_fog_hides_trees_until_revealed() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SLFG",
-            "LFFF",
+            "STFG",
+            "TFFF",
             "FFFF",
         ],
         fog_of_war=True,
@@ -397,7 +415,7 @@ def test_fog_hides_trees_until_revealed() -> None:
 def test_fog_reveals_tree_when_bumping() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SLFG",
+            "STFG",
             "FFFF",
             "FFFF",
         ],
@@ -408,7 +426,7 @@ def test_fog_reveals_tree_when_bumping() -> None:
         env.reset(seed=0)
         assert env._fog_display_char(0, 1) == "?"
         env.step(2)  # bump into tree at (0, 1) — stay at start
-        assert env._fog_display_char(0, 1) == "L"
+        assert env._fog_display_char(0, 1) == "T"
     finally:
         env.close()
 
@@ -416,9 +434,9 @@ def test_fog_reveals_tree_when_bumping() -> None:
 def test_sleigh_warp_pair() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SOFFG",
+            "SWFFG",
             "FFFFF",
-            "FFFFO",
+            "FFFFW",
         ],
         emit_map=True,
     )
@@ -445,7 +463,7 @@ def test_sleigh_pair_count_generation() -> None:
     )
     try:
         env.reset(seed=0)
-        assert sum(row.count("O") for row in env._gridmap or []) == 2
+        assert sum(row.count("W") for row in env._gridmap or []) == 2
     finally:
         env.close()
 
@@ -454,7 +472,7 @@ def test_fixed_map_odd_sleigh_count_raises() -> None:
     with pytest.raises(ValueError, match="even number"):
         ProceduralFrozenLakeEnv(
             fixed_map=[
-                "SOFFG",
+                "SWFFG",
                 "FFFFF",
             ],
         )
@@ -463,7 +481,7 @@ def test_fixed_map_odd_sleigh_count_raises() -> None:
 def test_glare_ice_is_slippery() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SRFFG",
+            "SMFFG",
             "FFFFF",
             "FFFFF",
         ],
@@ -515,14 +533,14 @@ def test_glare_prob_generation() -> None:
     try:
         env.reset(seed=0)
         board = "".join(env._gridmap or [])
-        assert "R" in board
+        assert "M" in board
     finally:
         env.close()
 
 
-def test_land_prob_generates_valid_map() -> None:
+def test_tree_prob_generates_valid_map() -> None:
     env = ProceduralFrozenLakeEnv(
-        land_prob=0.3,
+        tree_prob=0.3,
         hole_prob=0.0,
         min_hops=1,
         min_width=6,
@@ -534,7 +552,7 @@ def test_land_prob_generates_valid_map() -> None:
     try:
         env.reset(seed=0)
         assert env._gridmap is not None
-        assert any("L" in row for row in env._gridmap)
+        assert any("T" in row for row in env._gridmap)
     finally:
         env.close()
 
@@ -542,9 +560,9 @@ def test_land_prob_generates_valid_map() -> None:
 def test_fixed_map_with_glare_and_sleighs() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SOFFG",
-            "FRFFF",
-            "FFFFO",
+            "SWFFG",
+            "FMFFF",
+            "FFFFW",
         ],
         emit_q_star=True,
     )
@@ -574,13 +592,13 @@ def test_lake_has_jagged_land_edges() -> None:
         row_spans: list[tuple[int, int]] = []
         col_spans: list[tuple[int, int]] = []
         for row in board:
-            playable = [i for i, ch in enumerate(row) if ch != "L"]
+            playable = [i for i, ch in enumerate(row) if ch != "T"]
             if playable:
                 row_spans.append((playable[0], playable[-1]))
         width = len(board[0]) if board else 0
         for col_idx in range(width):
             playable_rows = [
-                r for r, row in enumerate(board) if row[col_idx] != "L"
+                r for r, row in enumerate(board) if row[col_idx] != "T"
             ]
             if playable_rows:
                 col_spans.append((playable_rows[0], playable_rows[-1]))
@@ -599,16 +617,17 @@ def test_special_tile_icons_render() -> None:
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SLRFG",
+            "STMFG",
             "FFFFF",
-            "FFOOF",
+            "FFWWF",
         ],
+        fog_of_war=False,
         render_mode="rgb_array",
     )
     try:
         env.reset(seed=0)
         icons = env._ensure_tile_icons()
-        assert set(icons) == {"L", "R", "O"}
+        assert set(icons) == {"T", "M", "W"}
         frame = env.render()
         assert frame is not None
         assert frame.shape[2] == 3
@@ -619,9 +638,9 @@ def test_special_tile_icons_render() -> None:
 def test_warp_reveals_both_sleighs_under_fog() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SOFFG",
+            "SWFFG",
             "FFFFF",
-            "FFFFO",
+            "FFFFW",
         ],
         fog_of_war=True,
         render_mode="ansi",
@@ -644,10 +663,11 @@ def test_sleigh_pair_badges_mark_pairs() -> None:
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SOFOG",
+            "SWFWG",
             "FFFFF",
-            "FOFOF",
+            "FWFWF",
         ],
+        fog_of_war=False,
         render_mode="rgb_array",
     )
     try:
@@ -682,6 +702,7 @@ def test_goal_reward_tint_and_badge() -> None:
             ],
             "rewards": {2: 0.1, 4: 1.5},
         },
+        fog_of_war=False,
         render_mode="rgb_array",
     )
     try:
@@ -708,10 +729,11 @@ def test_elf_visible_on_sleigh_after_warp() -> None:
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
-            "SOFFG",
+            "SWFFG",
             "FFFFF",
-            "FFFFO",
+            "FFFFW",
         ],
+        fog_of_war=False,
         render_mode="rgb_array",
     )
     try:
@@ -731,5 +753,243 @@ def test_elf_visible_on_sleigh_after_warp() -> None:
         # The elf must be drawn on top of the sleigh icon at the warp target,
         # so the cell's pixels change once the agent arrives.
         assert (before != after).any()
+    finally:
+        env.close()
+
+
+def _lake_bounding_box(board: list[str]) -> tuple[int, int]:
+    rows = [r for r, row in enumerate(board) if any(ch != "T" for ch in row)]
+    cols = [c for c in range(len(board[0])) if any(row[c] != "T" for row in board)]
+    return cols[-1] - cols[0] + 1, rows[-1] - rows[0] + 1
+
+
+def test_lake_fits_inside_width_height_envelope() -> None:
+    """All playable tiles fit in a max_width × max_height envelope; the jagged
+    lake itself may be smaller than the sampled envelope."""
+    for seed in range(50):
+        env = ProceduralFrozenLakeEnv(
+            min_width=5,
+            max_width=7,
+            min_height=5,
+            max_height=7,
+            hole_prob=0.0,
+            min_hops=1,
+            map_seed=seed,
+        )
+        try:
+            env.reset(seed=0)
+            width, height = _lake_bounding_box(env._gridmap or [])
+            assert width <= 7
+            assert height <= 7
+        finally:
+            env.close()
+
+
+def test_q_star_is_zero_at_terminal_states() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map={"board": ["SFG"], "rewards": {2: 0.7}},
+        step_penalty=-0.1,
+        emit_q_star=True,
+    )
+    try:
+        env.reset(seed=0)
+        q = env.compute_q_table()
+        assert np.allclose(q[2], 0.0)  # goal
+        env.step(2)
+        _, reward, terminated, _, info = env.step(2)
+        assert terminated
+        assert reward == pytest.approx(0.7 - 0.1)
+        assert np.allclose(info["q_star"], 0.0)
+    finally:
+        env.close()
+
+    env = ProceduralFrozenLakeEnv(fixed_map=["SFHG"], step_penalty=-0.1, emit_q_star=True)
+    try:
+        env.reset(seed=0)
+        assert np.allclose(env.compute_q_table()[2], 0.0)  # hole
+    finally:
+        env.close()
+
+
+def test_fog_slip_bump_reveals_actual_tile_not_intended() -> None:
+    """Slipping sideways on glare into a tree reveals the tree, not the intended tile."""
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=[
+            "STFG",
+            "FMHF",
+            "FFFF",
+        ],
+        fog_of_war=True,
+        render_mode="ansi",
+    )
+    try:
+        found = False
+        for seed in range(100):
+            env.reset(seed=seed)
+            assert env._visited is not None
+            env._visited[:] = False
+            env.unwrapped.s = 5  # glare at (1, 1)
+            env._mark_visited(5)
+            obs, _, _, _, _ = env.step(2)  # intend RIGHT; may slip UP into tree
+            if obs == 5:
+                assert env._visited[0, 1]  # the tree actually bumped
+                assert not env._visited[1, 2]  # the untouched hole to the right
+                found = True
+                break
+        assert found, "no slip-into-tree case sampled in 100 seeds"
+    finally:
+        env.close()
+
+
+def test_p_matrix_carries_real_rewards() -> None:
+    """env.P rewards match exactly what step() pays (per-goal reward + step penalty)."""
+    env = ProceduralFrozenLakeEnv(
+        fixed_map={"board": ["SFG"], "rewards": {2: 0.7}},
+        step_penalty=-0.1,
+    )
+    try:
+        env.reset(seed=0)
+        assert env.P[0][2] == [(1.0, 1, pytest.approx(-0.1), False)]
+        assert env.P[1][2] == [(1.0, 2, pytest.approx(0.7 - 0.1), True)]
+        _, reward, terminated, _, _ = env.step(2)
+        assert reward == pytest.approx(-0.1)
+        assert not terminated
+        _, reward, terminated, _, _ = env.step(2)
+        assert reward == pytest.approx(0.7 - 0.1)
+        assert terminated
+    finally:
+        env.close()
+
+
+def test_q_star_ignores_env_step_penalty() -> None:
+    """q_star reflects discounted goal rewards only, not the env's step_penalty."""
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=["SFG"],
+        step_penalty=-0.5,
+        emit_q_star=True,
+    )
+    try:
+        env.reset(seed=0)
+        q = env.compute_q_table()
+        # Two steps to the goal: 0.999^1 * 1.0, with no -0.5s mixed in.
+        assert q[0, 2] == pytest.approx(0.999)
+        assert env.q_star_gamma == pytest.approx(0.999)
+    finally:
+        env.close()
+
+
+def test_start_pos_outside_canvas_raises() -> None:
+    with pytest.raises(ValueError, match="outside the .* canvas"):
+        ProceduralFrozenLakeEnv(start_pos=999, map_seed=0)
+
+
+def test_probability_params_out_of_range_raise() -> None:
+    for kwargs in (
+        {"hole_prob": 1.5},
+        {"tree_prob": -0.1},
+        {"glare_prob": 2.0},
+        {"slippery_success_rate": 1.1},
+        {"start_pos_prob": -0.5},
+        {"goal_pos_prob": 7.0},
+    ):
+        with pytest.raises(ValueError, match=r"must be in \[0, 1\]"):
+            ProceduralFrozenLakeEnv(**kwargs)
+
+
+def test_width_height_bounds_validated() -> None:
+    with pytest.raises(ValueError, match="min <= max"):
+        ProceduralFrozenLakeEnv(min_width=9, max_width=8)
+    with pytest.raises(ValueError, match="min <= max"):
+        ProceduralFrozenLakeEnv(min_height=9, max_height=8)
+    with pytest.raises(ValueError, match=">= 1"):
+        ProceduralFrozenLakeEnv(min_width=0)
+
+
+def test_positions_with_fixed_map_raise() -> None:
+    for kwargs in (
+        {"start_pos": 0},
+        {"start_pos_prob": 0.5},
+        {"goal_pos": 2},
+        {"goal_pos_prob": 0.5},
+    ):
+        with pytest.raises(ValueError, match="ignored"):
+            ProceduralFrozenLakeEnv(fixed_map=["SFG"], **kwargs)
+
+
+def test_unplaceable_explicit_positions_raise_with_reason() -> None:
+    env = ProceduralFrozenLakeEnv(start_pos=27, goal_pos=27, map_seed=0, max_tries=50)
+    try:
+        with pytest.raises(RuntimeError, match="goal_pos 27 is not on playable lake ice"):
+            env.reset(seed=0)
+    finally:
+        env.close()
+
+
+def test_permutations_relabel_obs_and_actions() -> None:
+    import json
+
+    base = ProceduralFrozenLakeEnv(map_seed=5, emit_map=True, emit_q_star=True)
+    perm = ProceduralFrozenLakeEnv(
+        map_seed=5,
+        emit_map=True,
+        emit_q_star=True,
+        permute_obs=True,
+        permute_actions=True,
+    )
+    try:
+        base_obs, base_info = base.reset(seed=3)
+        perm_obs, perm_info = perm.reset(seed=3)
+        base_map = json.loads(base_info["map"])
+        perm_map = json.loads(perm_info["map"])
+        assert base_map["board"] == perm_map["board"]
+        obs_perm = perm_map["obs_permutation"]
+        act_perm = perm_map["action_permutation"]
+        assert sorted(obs_perm) == list(range(len(obs_perm)))
+        assert sorted(act_perm) == [0, 1, 2, 3]
+        assert perm_obs == obs_perm[base_obs]
+        assert np.allclose(
+            perm_info["q_star"], np.asarray(base_info["q_star"])[act_perm]
+        )
+        for external_action in range(4):
+            base.reset(seed=3)
+            perm.reset(seed=3)
+            b_obs, b_rew, b_term, _, _ = base.step(act_perm[external_action])
+            p_obs, p_rew, p_term, _, _ = perm.step(external_action)
+            assert p_obs == obs_perm[b_obs]
+            assert p_rew == b_rew
+            assert p_term == b_term
+    finally:
+        base.close()
+        perm.close()
+
+
+def test_permutations_resample_on_map_regeneration() -> None:
+    import json
+
+    env = ProceduralFrozenLakeEnv(
+        map_seed=5, emit_map=True, permute_obs=True, permute_actions=True
+    )
+    try:
+        _, first = env.reset(seed=0)
+        _, second = env.reset(seed=0, options={"regenerate_map": True})
+        first_map = json.loads(first["map"])
+        second_map = json.loads(second["map"])
+        assert (
+            first_map["obs_permutation"] != second_map["obs_permutation"]
+            or first_map["action_permutation"] != second_map["action_permutation"]
+        )
+    finally:
+        env.close()
+
+
+def test_map_info_has_no_permutations_when_disabled() -> None:
+    import json
+
+    env = ProceduralFrozenLakeEnv(map_seed=5, emit_map=True)
+    try:
+        _, info = env.reset(seed=0)
+        map_info = json.loads(info["map"])
+        assert "obs_permutation" not in map_info
+        assert "action_permutation" not in map_info
     finally:
         env.close()

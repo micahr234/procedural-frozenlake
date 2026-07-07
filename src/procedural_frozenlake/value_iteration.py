@@ -14,19 +14,21 @@ def solve_tabular_mdp(
     n_actions: int,
     gamma: float,
     step_penalty: float = 0.0,
-    goal_rewards_by_state: dict[int, float] | None = None,
+    terminal_states: set[int] | None = None,
     max_iter: int = 10_000,
     tolerance: float = 1e-10,
 ) -> np.ndarray:
     """Compute an optimal Q-table for a finite tabular MDP from Gymnasium ``P``.
 
     Args:
-        P: Gymnasium ``env.P`` dynamics, indexed by state and action.
+        P: Gymnasium ``env.P`` dynamics, indexed by state and action. Transition
+            rewards are used as-is.
         n_states: Number of states.
         n_actions: Number of actions.
         gamma: Discount factor.
         step_penalty: Added to each transition reward before the Bellman backup.
-        goal_rewards_by_state: Override terminal rewards at goal states.
+        terminal_states: States whose Q-values are pinned to zero (no further
+            return is obtainable once the episode has ended there).
         max_iter: Maximum value-iteration sweeps.
         tolerance: Stop when max absolute Q change is below this.
 
@@ -34,21 +36,20 @@ def solve_tabular_mdp(
         Optimal Q-table, shape ``(n_states, n_actions)``, ``float64``.
     """
     g = float(gamma)
-    goal_rewards = goal_rewards_by_state or {}
+    terminals = frozenset(terminal_states or ())
     q = np.zeros((n_states, n_actions), dtype=np.float64)
     for _ in range(int(max_iter)):
         v = q.max(axis=1)
         q_new = np.zeros((n_states, n_actions), dtype=np.float64)
         for s in range(n_states):
+            if s in terminals:
+                continue
             for a in range(n_actions):
                 acc = 0.0
                 for prob, next_s, r, done in P[s][a]:
                     p = float(prob)
                     ns = int(next_s)
-                    rr = float(r)
-                    if done and ns in goal_rewards:
-                        rr = float(goal_rewards[ns])
-                    rr += step_penalty
+                    rr = float(r) + step_penalty
                     if done:
                         acc += p * rr
                     else:

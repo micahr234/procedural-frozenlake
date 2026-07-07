@@ -1,4 +1,4 @@
-"""Pixel-art tile icons for land (tree), glare ice, and sleigh tiles.
+"""Pixel-art tile icons for tree, glare (mirror) ice, and warp sleigh tiles.
 
 Sprites are authored on a 32x32 grid — the same resolution and palette as the
 original Gymnasium FrozenLake assets (``ice.png``, ``hole.png``) — and scaled
@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import pygame
 
-TILE_LAND = "L"
-TILE_GLARE = "R"
-TILE_SLEIGH = "O"
+TILE_TREE = "T"
+TILE_GLARE = "M"
+TILE_SLEIGH = "W"
 
-SPECIAL_TILES = (TILE_LAND, TILE_GLARE, TILE_SLEIGH)
+SPECIAL_TILES = (TILE_TREE, TILE_GLARE, TILE_SLEIGH)
 
 NATIVE_SIZE = 32
 
@@ -236,7 +236,7 @@ def _sleigh_pixels() -> _Grid:
 
 
 _PIXEL_BUILDERS = {
-    TILE_LAND: _tree_pixels,
+    TILE_TREE: _tree_pixels,
     TILE_GLARE: _glare_pixels,
     TILE_SLEIGH: _sleigh_pixels,
 }
@@ -322,12 +322,12 @@ def _surface_from_pixels(grid: _Grid) -> Any:
 
 
 def build_native_tile_icons() -> dict[str, Any]:
-    """Return 32x32 pygame surfaces for L/R/O sprites (transparent background)."""
+    """Return 32x32 pygame surfaces for T/M/W sprites (transparent background)."""
     return {tile: _surface_from_pixels(build()) for tile, build in _PIXEL_BUILDERS.items()}
 
 
 def build_special_tile_icons(cell_size: tuple[int, int]) -> dict[str, "pygame.Surface"]:
-    """Return pygame surfaces for L/R/O tiles scaled to ``cell_size``.
+    """Return pygame surfaces for T/M/W tiles scaled to ``cell_size``.
 
     Nearest-neighbor scaling preserves the pixel-art look of the sprites.
     """

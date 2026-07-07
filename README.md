@@ -6,17 +6,19 @@ A Gymnasium environment that extends Frozen Lake with **procedurally generated m
 
 `Procedural-FrozenLake-v1` provides:
 
-- **Jagged lake shorelines** — every random map is a rectangular lake on a fixed canvas, bounded by impassable land (`L`) with independently varying edges per row and column.
-- **Tile-driven physics** — glare ice (`R`) is locally slippery; sleighs (`O`) warp between paired tiles; no global `is_slippery` flag.
+- **Jagged lake shorelines** — every random map is a lake on a fixed canvas, bounded by impassable trees (`T`) with independently varying edges per row and column. A lake envelope sampled within `min_width..max_width` × `min_height..max_height` is placed uniformly at random; all playable tiles fit inside it, though the jagged shoreline may leave the lake smaller than the envelope.
+- **Tile-driven physics** — glare ice (`M`, mirror ice) is locally slippery; sleighs (`W`, warp) teleport between paired tiles; no global `is_slippery` flag.
 - **Flexible start and goal placement** — fixed positions, lists of positions, or probabilistic placement; multiple starts and goals supported.
 - **Per-goal rewards** — sample or specify a different reward for each goal tile.
 - **Fresh maps on reset** — pass `options={"regenerate_map": True}` to sample a new valid layout without rebuilding the env.
 - **Stable observation space** — always `Discrete(max_width * max_height)`; state index is `row * max_width + col` on the fixed canvas.
-- **Optional supervision signals** — `emit_map=True` and `emit_q_star=True` expose the layout and optimal Q-values in `info`.
-- **Fog of war rendering** — `fog_of_war=True` hides unvisited tiles as `?`, including trees; bumping a tree reveals it; warping reveals both sleighs of the pair; exploration persists until map regeneration.
+- **Optional supervision signals** — `emit_map=True` and `emit_q_star=True` expose the layout and optimal Q-values in `info` on every `reset()` and `step()`.
+- **Fog of war rendering** — on by default: unvisited tiles render as `?`, including trees; bumping a tree reveals it; warping reveals both sleighs of the pair; exploration persists until map regeneration. Pass `fog_of_war=False` for a fully visible map.
+- **Observation and action relabeling** — `permute_obs=True` / `permute_actions=True` scramble state indices and action ids with permutations sampled alongside the map (and exposed in `info["map"]`), so agents can't rely on the canonical grid numbering.
 
 ## News
 
+- **2026-07-07 — v0.4.0** — New tile letters (`T`/`M`/`W`), fog of war on by default, observation/action permutations, `env.P` carries exact rewards, Q\* discounted by `q_star_gamma`, constructor validation, lake envelope placement. See [CHANGELOG.md](CHANGELOG.md).
 - **2026-07-07 — v0.3.0** — Variable map boundaries (land shorelines, glare ice, ice floe warps), fixed `max_width × max_height` canvas, tile-driven slipperiness. See [CHANGELOG.md](CHANGELOG.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
@@ -82,7 +84,9 @@ row = obs // max_width
 col = obs % max_width
 ```
 
-Random maps use a fixed `max_height × max_width` canvas. Land (`L`) cells surround the lake; the agent only occupies playable tiles (`S`, `F`, `R`, `O`, `G`).
+Random maps use a fixed `max_height × max_width` canvas. Tree (`T`) cells surround the lake; the agent only occupies playable tiles (`S`, `F`, `M`, `W`, `G`).
+
+With `permute_obs=True` the formula above no longer applies: observations are relabeled by a random permutation of the canvas state indices, sampled with the map and listed in `info["map"]` as `obs_permutation` (`external_obs = obs_permutation[internal_state]`). Likewise `permute_actions=True` relabels the four actions via `action_permutation`, and `info["q_star"]` is reported in external action order.
 
 ### Tile legend
 
@@ -90,38 +94,59 @@ Random maps use a fixed `max_height × max_width` canvas. Land (`L`) cells surro
 |------|------|----------|
 | `S` | Start | Walkable; deterministic movement |
 | `F` | Frozen | Normal safe ice; deterministic movement |
-| `R` | Glare ice | Slippery ice (stochastic sliding when standing on it) |
-| `O` | Sleigh | Warp to paired sleigh on entry (row-major pairing) |
+| `M` | Mirror (glare) ice | Slippery ice (stochastic sliding when standing on it) |
+| `W` | Warp sleigh | Warp to paired sleigh on entry (row-major pairing) |
 | `H` | Hole | Terminal — fall through |
 | `G` | Goal | Terminal — success |
-| `L` | Tree | Impassable shoreline and optional interior patches |
+| `T` | Tree | Impassable shoreline and optional interior patches |
 
-In `human` / `rgb_array` rendering, `L` / `R` / `O` appear as pixel-art sprites drawn in the original FrozenLake style (snowy pine tree, almost-white polished ice patch with a star gleam, red sleigh with a reindeer) over the standard ice tile. Each sleigh also carries a small numbered color-coded badge in its bottom-left corner; linked sleighs share the same badge. Goal presents show their reward in a badge, and the bow is tinted from yellow (low reward) to green (high reward) relative to the map's reward range. ANSI mode colorizes those letters (white / cyan / blue).
+In `human` / `rgb_array` rendering, `T` / `M` / `W` appear as pixel-art sprites drawn in the original FrozenLake style (snowy pine tree, almost-white polished ice patch with a star gleam, red sleigh with a reindeer) over the standard ice tile. Each sleigh also carries a small numbered color-coded badge in its bottom-left corner; linked sleighs share the same badge. Goal presents show their reward in a badge, and the bow is tinted from yellow (low reward) to green (high reward) relative to the map's reward range. ANSI mode colorizes tiles the same with fog on or off: trees white, glare ice cyan, sleighs and holes blue, goals green, starts yellow.
 
-Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — the dangerous patches on a frozen lake. For a fully slippery map like classic Gymnasium FrozenLake, use `glare_prob=1.0`.
+Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — the dangerous patches on a frozen lake. `glare_prob=1.0` gives a map similar to the classic slippery Gymnasium FrozenLake (start tiles stay deterministic; only plain frozen tiles become glare).
 
 ### Constructor parameters
 
+**Map generation**
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `min_hops` | `3` | Minimum shortest-path length from start to goal |
-| `min_width`, `max_width` | `3`, `8` | Lake width bounds (canvas width = `max_width`) |
-| `min_height`, `max_height` | `3`, `8` | Lake height bounds (canvas height = `max_height`) |
-| `land_prob` | `0.0` | Probability a frozen ice tile becomes interior land after the lake is carved |
-| `glare_prob` | `0.0` | Probability a playable tile becomes glare ice `R` |
-| `sleigh_pair_count` | `0` | Number of sleigh warp pairs (`2 × count` `O` tiles) |
-| `slippery_success_rate` | `1/3` | Intended-direction success rate on glare ice `R` |
-| `hole_prob` | `0.2` | Probability a tile becomes a hole |
-| `start_pos`, `start_pos_prob` | `None` | Fixed start tile(s) or probability of placing starts |
-| `goal_pos`, `goal_pos_prob` | `None` | Fixed goal tile(s) or probability of placing goals |
-| `fixed_map` | `None` | Fixed layout (list of row strings or dict with `board`/`rewards`) |
-| `emit_q_star` | `False` | Inject optimal Q-values in `info["q_star"]` |
-| `emit_map` | `False` | Inject map layout in `info["map"]` |
-| `goal_reward_low`, `goal_reward_high` | `1.0`, `1.0` | Per-goal reward sampling bounds |
-| `step_penalty` | `0.0` | Added to every step reward (e.g. `-0.01`) |
-| `q_star_step_penalty` | `None` | Per-step cost in value iteration only; defaults to `step_penalty` when non-zero, otherwise a small epsilon (`-1e-6`) so Q\* prefers shorter paths |
 | `map_seed` | `None` | Seed for map generation (independent of reset seed) |
-| `fog_of_war` | `False` | Hide unvisited tiles as `?` (trees revealed when visited or bumped) |
+| `fixed_map` | `None` | Fixed layout (list of row strings or dict with `board`/`rewards`); disables random generation and cannot be combined with `start_pos`/`goal_pos` options |
+| `min_width`, `max_width` | `3`, `8` | Width bounds for the sampled lake envelope; all playable tiles fit inside it (canvas width = `max_width`) |
+| `min_height`, `max_height` | `3`, `8` | Height bounds for the sampled lake envelope; all playable tiles fit inside it (canvas height = `max_height`) |
+| `hole_prob` | `0.2` | Probability a tile becomes a hole `H` |
+| `tree_prob` | `0.0` | Probability a frozen ice tile becomes an interior tree `T` after the lake is carved |
+| `glare_prob` | `0.0` | Probability a frozen (`F`) tile becomes glare ice `M` |
+| `sleigh_pair_count` | `0` | Number of sleigh warp pairs (`2 × count` `W` tiles) |
+| `start_pos`, `start_pos_prob` | `None`, `None` | Fixed start tile(s) or probability of placing starts; explicit positions raise an error when they can't be placed on lake ice |
+| `goal_pos`, `goal_pos_prob` | `None`, `None` | Fixed goal tile(s) or probability of placing goals; explicit positions raise an error when they can't be placed on lake ice |
+| `min_hops` | `3` | Minimum shortest-path length from start to goal |
+| `max_tries` | `10_000` | Generation attempts before giving up with an error |
+
+**Dynamics and rewards**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `slippery_success_rate` | `1/3` | Intended-direction success rate on glare ice `M` |
+| `step_penalty` | `0.0` | Added to every step reward (e.g. `-0.01`); baked into `env.P` transition rewards |
+| `goal_reward_low`, `goal_reward_high` | `1.0`, `1.0` | Per-goal reward sampling bounds |
+
+**Supervision signals in `info`**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `emit_map` | `False` | Inject map layout in `info["map"]` on every `reset()` and `step()` |
+| `emit_q_star` | `False` | Inject optimal Q-values in `info["q_star"]` (zero at terminal states) |
+| `q_star_gamma` | `0.999` | Discount used in value iteration only (env `step_penalty` is excluded), so Q\* always points toward shorter paths |
+
+**Relabeling and rendering**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `permute_obs` | `False` | Relabel observations with a random permutation of canvas state indices, sampled with the map |
+| `permute_actions` | `False` | Relabel the four actions with a random permutation, sampled with the map |
+| `fog_of_war` | `True` | Hide unvisited tiles as `?` (trees revealed when visited or bumped); set `False` to render the full map |
+| `render_mode` | `None` | Standard Gymnasium render mode: `"ansi"`, `"human"`, or `"rgb_array"` |
 
 ### Reset options
 

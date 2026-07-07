@@ -12,6 +12,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium.envs.registration import register, registry
 from gymnasium.envs.toy_text.frozen_lake import DOWN, LEFT, RIGHT, UP, FrozenLakeEnv
+from gymnasium.envs.toy_text.utils import categorical_sample
 
 from procedural_frozenlake.tile_icons import (
     SPECIAL_TILES,
@@ -26,98 +27,140 @@ PROCEDURAL_FROZENLAKE_ENV_ID = "Procedural-FrozenLake-v1"
 
 TILE_START = "S"
 TILE_FROZEN = "F"
-TILE_GLARE = "R"
-TILE_SLEIGH = "O"
+TILE_GLARE = "M"  # Mirror ice
+TILE_SLEIGH = "W"  # Warp sleigh
 TILE_HOLE = "H"
 TILE_GOAL = "G"
-TILE_LAND = "L"
+TILE_TREE = "T"
 
 TERMINAL_TILES = frozenset({TILE_GOAL, TILE_HOLE})
 PLAYABLE_TILES = frozenset(
     {TILE_START, TILE_FROZEN, TILE_GLARE, TILE_SLEIGH, TILE_GOAL, TILE_HOLE}
 )
-ALLOWED_TILES = PLAYABLE_TILES | {TILE_LAND}
+ALLOWED_TILES = PLAYABLE_TILES | {TILE_TREE}
 
 _TILE_ICON_FILES = {
-    TILE_LAND: "tree.png",
+    TILE_TREE: "tree.png",
     TILE_GLARE: "glare_ice.png",
     TILE_SLEIGH: "sleigh.png",
 }
 
-# Small per-step cost used only in value iteration when ``step_penalty`` is zero.
-# Breaks ties toward shorter paths (important when episodes can truncate with no
-# step cost in the live environment).
-DEFAULT_Q_STAR_STEP_PENALTY = -1e-6
+def _validate_prob(name: str, value: float) -> float:
+    v = float(value)
+    if not 0.0 <= v <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1], got {value!r}.")
+    return v
 
 
 class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     """Procedural Frozen Lake variant with generated valid map and optional q_star info.
 
     Maps use a fixed canvas of ``max_height × max_width`` tiles (random generation) or the
-    dimensions of ``fixed_map``. Land (``L``) tiles surround the lake and are impassable; glare ice
-    (``R``) tiles are locally slippery; sleighs (``O``) warp between paired tiles.
+    dimensions of ``fixed_map``. A lake envelope sampled within
+    ``min_width..max_width`` × ``min_height..max_height`` is placed uniformly at random on
+    the canvas; all playable tiles lie inside it, though the jagged shoreline may leave the
+    lake smaller than the envelope. Tree (``T``) tiles surround the lake and are impassable;
+    glare ice (``M``, mirror ice) tiles are locally slippery; sleighs (``W``) warp between
+    paired tiles.
 
     ``goal_reward_low`` / ``goal_reward_high`` sample one reward **per goal tile** when the map
-    is generated. When ``emit_q_star`` is True, :meth:`compute_q_table` uses the rebuilt
-    transition matrix ``P`` and a separate ``q_star_step_penalty`` (defaults to a small
-    epsilon when ``step_penalty`` is zero so optimal actions prefer progress over looping).
+    is generated. The transition matrix ``P`` carries the exact env rewards (per-goal reward
+    plus ``step_penalty``), so planning directly from ``P`` matches live behavior. When
+    ``emit_q_star`` is True, :meth:`compute_q_table` solves ``P`` with the env
+    ``step_penalty`` stripped out and discount ``q_star_gamma`` (default ``0.999``), so
+    Q\\* is independent of reward shaping and always points toward shorter paths. Terminal
+    states (goal/hole) and tree states have Q-values of zero.
 
-    When ``emit_map`` is True, ``info["map"]`` is a JSON string with ``board``, ``rewards``,
-    ``canvas``, ``playable_count``, and ``sleighs``.
+    When ``emit_map`` is True, every :meth:`reset` and :meth:`step` puts a JSON string in
+    ``info["map"]`` with ``board``, ``rewards``, ``canvas``, ``playable_count``, ``sleighs``,
+    and — when enabled — ``obs_permutation`` / ``action_permutation``.
+
+    ``permute_obs=True`` relabels observations with a random permutation of the canvas state
+    indices; ``permute_actions=True`` relabels the four actions. Both permutations are sampled
+    with the map (from ``map_seed``) and resampled when the map regenerates.
 
     Pass ``options={"regenerate_map": True}`` to :meth:`reset` to sample a fresh map.
 
-    With ``fog_of_war=True``, unvisited tiles render as ``?``, including trees (``L``).
-    Warping through a sleigh reveals both sleighs of the pair.
-    Bumping into a tree reveals it.
+    With ``fog_of_war=True`` (the default), unvisited tiles render as ``?``, including
+    trees (``T``). Warping through a sleigh reveals both sleighs of the pair.
+    Bumping into a blocked tile reveals it. Pass ``fog_of_war=False`` to render the
+    full map.
     """
 
     def __init__(
         self,
         render_mode: str | None = None,
-        min_hops: int = 3,
+        # Map generation
+        map_seed: int | None = None,
+        fixed_map: list[str] | tuple[str, ...] | Mapping[str, Any] | None = None,
         min_width: int = 3,
         max_width: int = 8,
         min_height: int = 3,
         max_height: int = 8,
         hole_prob: float = 0.2,
+        tree_prob: float = 0.0,
+        glare_prob: float = 0.0,
+        sleigh_pair_count: int = 0,
         start_pos: int | list[int] | None = None,
         start_pos_prob: float | None = None,
         goal_pos: int | list[int] | None = None,
         goal_pos_prob: float | None = None,
+        min_hops: int = 3,
         max_tries: int = 10_000,
-        fixed_map: list[str] | tuple[str, ...] | Mapping[str, Any] | None = None,
-        emit_q_star: bool = False,
-        emit_map: bool = False,
+        # Dynamics and rewards
+        slippery_success_rate: float = 1.0 / 3.0,
+        step_penalty: float = 0.0,
         goal_reward_low: float = 1.0,
         goal_reward_high: float = 1.0,
-        step_penalty: float = 0.0,
-        q_star_step_penalty: float | None = None,
-        map_seed: int | None = None,
-        fog_of_war: bool = False,
-        land_prob: float = 0.0,
-        glare_prob: float = 0.0,
-        sleigh_pair_count: int = 0,
-        slippery_success_rate: float = 1.0 / 3.0,
-        min_playable_tiles: int | None = None,
-        max_playable_tiles: int | None = None,
+        # Supervision signals in info
+        emit_map: bool = False,
+        emit_q_star: bool = False,
+        q_star_gamma: float = 0.999,
+        # Observation/action relabeling and rendering
+        permute_obs: bool = False,
+        permute_actions: bool = False,
+        fog_of_war: bool = True,
     ):
+        hole_prob = _validate_prob("hole_prob", hole_prob)
+        tree_prob = _validate_prob("tree_prob", tree_prob)
+        glare_prob = _validate_prob("glare_prob", glare_prob)
+        slippery_success_rate = _validate_prob(
+            "slippery_success_rate", slippery_success_rate
+        )
+        if start_pos_prob is not None:
+            _validate_prob("start_pos_prob", start_pos_prob)
+        if goal_pos_prob is not None:
+            _validate_prob("goal_pos_prob", goal_pos_prob)
+        if min_width < 1 or min_height < 1:
+            raise ValueError(
+                f"min_width and min_height must be >= 1, got {min_width} and {min_height}."
+            )
+        if min_width > max_width or min_height > max_height:
+            raise ValueError(
+                f"Width/height bounds must satisfy min <= max, got width "
+                f"{min_width}..{max_width} and height {min_height}..{max_height}."
+            )
+        if sleigh_pair_count < 0:
+            raise ValueError(f"sleigh_pair_count must be >= 0, got {sleigh_pair_count}.")
+        if not 0.0 < float(q_star_gamma) <= 1.0:
+            raise ValueError(f"q_star_gamma must be in (0, 1], got {q_star_gamma!r}.")
+        if fixed_map is not None and any(
+            v is not None for v in (start_pos, start_pos_prob, goal_pos, goal_pos_prob)
+        ):
+            raise ValueError(
+                "start_pos, start_pos_prob, goal_pos, and goal_pos_prob are ignored "
+                "when fixed_map is set; encode start/goal tiles in the fixed map instead."
+            )
         lo, hi = float(goal_reward_low), float(goal_reward_high)
         if lo > hi:
             lo, hi = hi, lo
         self._goal_reward_low = lo
         self._goal_reward_high = hi
         self._step_penalty = float(step_penalty)
-        if q_star_step_penalty is not None:
-            self._q_star_step_penalty = float(q_star_step_penalty)
-        elif step_penalty != 0.0:
-            self._q_star_step_penalty = float(step_penalty)
-        else:
-            self._q_star_step_penalty = DEFAULT_Q_STAR_STEP_PENALTY
+        self.q_star_gamma = float(q_star_gamma)
         self.emit_q_star = bool(emit_q_star)
         self.emit_map = bool(emit_map)
         self._has_fixed_map = fixed_map is not None
-        self.gamma = 1.0
         self._render_mode = render_mode
         self._slippery_success_rate = float(slippery_success_rate)
         self._canvas_height = int(max_height)
@@ -135,11 +178,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             "start_pos_prob": start_pos_prob,
             "goal_pos": goal_pos,
             "goal_pos_prob": goal_pos_prob,
-            "land_prob": float(land_prob),
+            "tree_prob": float(tree_prob),
             "glare_prob": float(glare_prob),
             "sleigh_pair_count": int(sleigh_pair_count),
-            "min_playable_tiles": min_playable_tiles,
-            "max_playable_tiles": max_playable_tiles,
         }
         self._map_rng = random.Random(map_seed)
         self._gridmap: list[str] | None = None
@@ -156,6 +197,10 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._sleigh_badges_key: tuple[tuple[int, int], int] | None = None
         self._goal_icons: dict[int, Any] | None = None
         self._goal_icons_key: Any = None
+        self.permute_obs = bool(permute_obs)
+        self.permute_actions = bool(permute_actions)
+        self._obs_perm: list[int] | None = None
+        self._action_perm: list[int] | None = None
         self.action_space = gym.spaces.Discrete(4)
         fixed_rewards: Mapping[int | str, float] | None = None
         if fixed_map is not None:
@@ -167,6 +212,22 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         else:
             self._observation_space_n = self._canvas_height * self._canvas_width
             self.observation_space = gym.spaces.Discrete(self._observation_space_n)
+            self._validate_positions_in_canvas(start_pos, "start_pos")
+            self._validate_positions_in_canvas(goal_pos, "goal_pos")
+
+    def _validate_positions_in_canvas(
+        self, pos: int | list[int] | None, name: str
+    ) -> None:
+        if pos is None:
+            return
+        values = [pos] if isinstance(pos, int) else list(pos)
+        n = self._canvas_height * self._canvas_width
+        for p in values:
+            if not 0 <= int(p) < n:
+                raise ValueError(
+                    f"{name} {p} is outside the {self._canvas_height}x{self._canvas_width} "
+                    f"canvas (valid state indices are 0..{n - 1})."
+                )
 
     def _restore_max_observation_space(self) -> None:
         self.observation_space = gym.spaces.Discrete(self._observation_space_n)
@@ -215,7 +276,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         return pairs
 
     def _playable_tile_count(self, gridmap: list[str]) -> int:
-        return sum(ch != TILE_LAND for row in gridmap for ch in row)
+        return sum(ch != TILE_TREE for row in gridmap for ch in row)
 
     def _rebuild_transition_matrix(self) -> None:
         nrow, ncol = int(self.nrow), int(self.ncol)
@@ -241,10 +302,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             return row, col
 
         def resolve_landing(row: int, col: int) -> tuple[int, int, int, bytes, bool]:
-            """Return (state, row, col, tile_bytes, terminated)."""
+            """Return (state, row, col, tile_bytes, terminated). Caller guarantees
+            the landing tile is not a tree (tree bumps are handled as self-loops)."""
             tile = bytes(desc[row, col])
-            if tile == TILE_LAND.encode():
-                return to_s(row, col), row, col, tile, False
             state = to_s(row, col)
             if tile == TILE_SLEIGH.encode():
                 state = sleigh_partner.get(state, state)
@@ -253,25 +313,37 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             terminated = tile in {TILE_GOAL.encode(), TILE_HOLE.encode()}
             return state, row, col, tile, terminated
 
-        def transition_reward(tile: bytes) -> float:
+        goal_rewards = self._goal_rewards_by_state
+        step_penalty = float(self._step_penalty)
+
+        def transition_reward(state: int, tile: bytes) -> float:
+            """Exact reward the env pays for this transition (goal reward + step penalty)."""
             if tile == TILE_GOAL.encode():
-                return 1.0
-            return 0.0
+                return float(goal_rewards[state]) + step_penalty
+            return step_penalty
 
         self.P = {s: {a: [] for a in range(n_a)} for s in range(n_s)}
+        # Movement direction actually taken for each P entry, aligned index-for-index
+        # with the transition tuples (None for terminal self-loops). Used by fog of
+        # war to reveal the tile the agent really bumped into after a glare slip.
+        self._transition_move_dirs: dict[int, dict[int, list[int | None]]] = {
+            s: {a: [] for a in range(n_a)} for s in range(n_s)
+        }
 
         for row in range(nrow):
             for col in range(ncol):
                 s = to_s(row, col)
                 tile = bytes(desc[row, col])
-                if tile in {TILE_GOAL.encode(), TILE_HOLE.encode(), TILE_LAND.encode()}:
+                if tile in {TILE_GOAL.encode(), TILE_HOLE.encode(), TILE_TREE.encode()}:
                     for a in range(n_a):
                         self.P[s][a] = [(1.0, s, 0.0, True)]
+                        self._transition_move_dirs[s][a] = [None]
                     continue
 
                 is_slippery = tile == TILE_GLARE.encode()
                 for a in range(n_a):
                     li = self.P[s][a]
+                    dirs = self._transition_move_dirs[s][a]
                     actions = (
                         [(a - 1) % 4, a, (a + 1) % 4]
                         if is_slippery
@@ -285,16 +357,17 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
                         )
                         new_row, new_col = inc(row, col, move_a)
                         landed_tile = bytes(desc[new_row, new_col])
-                        if landed_tile == TILE_LAND.encode():
+                        if landed_tile == TILE_TREE.encode():
                             new_state = s
-                            reward = 0.0
+                            reward = step_penalty
                             terminated = False
                         else:
                             new_state, _, _, landed_tile, terminated = resolve_landing(
                                 new_row, new_col
                             )
-                            reward = transition_reward(landed_tile)
+                            reward = transition_reward(new_state, landed_tile)
                         li.append((prob, new_state, reward, terminated))
+                        dirs.append(move_a)
 
     def _initialize_frozenlake_map(
         self,
@@ -321,6 +394,19 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         )
         self._rebuild_transition_matrix()
         self._restore_max_observation_space()
+        n_states = self._canvas_height * self._canvas_width
+        if self.permute_obs:
+            obs_perm = list(range(n_states))
+            self._map_rng.shuffle(obs_perm)
+            self._obs_perm = obs_perm
+        else:
+            self._obs_perm = None
+        if self.permute_actions:
+            action_perm = list(range(4))
+            self._map_rng.shuffle(action_perm)
+            self._action_perm = action_perm
+        else:
+            self._action_perm = None
         self._map_info = to_json_str(self._make_map_info_dict())
         self._map_dirty = True
         self._q_table = None
@@ -344,7 +430,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             )
 
     def _make_map_info_dict(self) -> dict[str, Any]:
-        return {
+        info: dict[str, Any] = {
             "board": list(self._gridmap or []),
             "rewards": {
                 str(k): float(v) for k, v in sorted(self._goal_rewards_by_state.items())
@@ -353,6 +439,11 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             "playable_count": self._playable_tile_count(self._gridmap or []),
             "sleighs": {"pairs": self._sleigh_pairs_for_info()},
         }
+        if self._obs_perm is not None:
+            info["obs_permutation"] = list(self._obs_perm)
+        if self._action_perm is not None:
+            info["action_permutation"] = list(self._action_perm)
+        return info
 
     @staticmethod
     def goal_states_from_gridmap(gridmap: list[str], canvas_width: int | None = None) -> list[int]:
@@ -410,13 +501,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         lo, hi = self._goal_reward_low, self._goal_reward_high
         return {s: float(rng.uniform(lo, hi)) for s in goal_states}
 
-    def _landed_on_goal(self, obs: int) -> bool:
-        row, col = self._obs_to_row_col(obs)
-        return self._decode_grid_char(self.desc[row, col]) == TILE_GOAL
-
     @classmethod
     def _is_blocked_for_path(cls, ch: str) -> bool:
-        return ch in {TILE_HOLE, TILE_LAND}
+        return ch in {TILE_HOLE, TILE_TREE}
 
     @classmethod
     def _find_path_to_goal_bfs(
@@ -518,30 +605,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         cls._build_sleigh_partners(gridmap, row_width)
         return gridmap
 
-    @staticmethod
-    def _resolve_playable_bounds(
-        min_width: int,
-        max_width: int,
-        min_height: int,
-        max_height: int,
-        canvas_width: int,
-        canvas_height: int,
-        min_playable_tiles: int | None,
-        max_playable_tiles: int | None,
-    ) -> tuple[int, int, int, int]:
-        if min_playable_tiles is not None:
-            lo_tiles = min_playable_tiles
-        else:
-            inner_w = max(2, min_width - 2)
-            inner_h = max(2, min_height - 2)
-            lo_tiles = max(4, inner_w * inner_h)
-        hi_tiles = (
-            max_playable_tiles
-            if max_playable_tiles is not None
-            else canvas_width * canvas_height
-        )
-        return lo_tiles, hi_tiles, min_width, max_width
-
     @classmethod
     def _largest_connected_component(
         cls, mask: list[list[bool]]
@@ -620,51 +683,22 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         min_height: int,
         max_height: int,
     ) -> list[list[bool]]:
-        """Playable lake ice with jagged land shoreline on all four sides.
+        """Playable lake ice with a jagged land shoreline on all four sides.
 
-        Each row gets its own horizontal span and each column its own vertical span;
-        a cell is ice only when both spans include it. Edge random walks stay within ±1
-        so neighbouring rows/columns overlap and the lake stays connected.
-
-        When the minimum playable tile count requires filling the whole bounding box,
-        the box is left solid (no interior land margin).
+        A ``w × h`` envelope with ``w`` sampled from ``min_width..max_width`` and
+        ``h`` from ``min_height..max_height`` is placed uniformly at random on the
+        canvas, so the land border thickness varies. All playable tiles lie inside
+        the envelope; edge random walks erode the shoreline within it, so the lake
+        itself may be smaller than the envelope.
         """
-        lo_tiles, _, _, _ = cls._resolve_playable_bounds(
-            min_width,
-            max_width,
-            min_height,
-            max_height,
-            canvas_width,
-            canvas_height,
-            None,
-            None,
-        )
-        for _ in range(32):
+        for _ in range(64):
             w = rng.randint(min_width, min(max_width, canvas_width))
             h = rng.randint(min_height, min(max_height, canvas_height))
-            max_top = canvas_height - h
-            max_left = canvas_width - w
-            jitter = min(1, max_top, max_left)
-            top = (
-                max(0, min(max_top, max_top // 2 + rng.randint(-jitter, jitter)))
-                if max_top > 0
-                else 0
-            )
-            left = (
-                max(0, min(max_left, max_left // 2 + rng.randint(-jitter, jitter)))
-                if max_left > 0
-                else 0
-            )
+            top = rng.randint(0, canvas_height - h)
+            left = rng.randint(0, canvas_width - w)
 
-            if lo_tiles >= w * h:
-                mask = [[False] * canvas_width for _ in range(canvas_height)]
-                for row_offset in range(h):
-                    for col_offset in range(w):
-                        mask[top + row_offset][left + col_offset] = True
-                return mask
-
-            min_span_h = max(2, min(w, min_width) - 2, w - 2)
-            min_span_v = max(2, min(h, min_height) - 2, h - 2)
+            min_span_h = max(2, w - 2)
+            min_span_v = max(2, h - 2)
 
             left_erode = cls._edge_erode(rng, h, w, min_span_h)
             right_erode = cls._edge_erode(rng, h, w, min_span_h)
@@ -688,47 +722,13 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         raise RuntimeError("Could not generate a connected lake mask.")
 
     @classmethod
-    def _generate_playable_mask(
-        cls,
-        rng: random.Random,
-        *,
-        canvas_width: int,
-        canvas_height: int,
-        min_width: int,
-        max_width: int,
-        min_height: int,
-        max_height: int,
-        min_playable_tiles: int | None,
-        max_playable_tiles: int | None,
-    ) -> list[list[bool]]:
-        cls._resolve_playable_bounds(
-            min_width,
-            max_width,
-            min_height,
-            max_height,
-            canvas_width,
-            canvas_height,
-            min_playable_tiles,
-            max_playable_tiles,
-        )
-        return cls._generate_lake_mask(
-            rng,
-            canvas_width=canvas_width,
-            canvas_height=canvas_height,
-            min_width=min_width,
-            max_width=max_width,
-            min_height=min_height,
-            max_height=max_height,
-        )
-
-    @classmethod
     def _mask_to_base_gridmap(
         cls, mask: list[list[bool]], canvas_width: int
     ) -> list[str]:
         rows: list[str] = []
         for row in mask:
             rows.append(
-                "".join(TILE_FROZEN if playable else TILE_LAND for playable in row)
+                "".join(TILE_FROZEN if playable else TILE_TREE for playable in row)
             )
         return rows
 
@@ -737,7 +737,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         indices: list[int] = []
         for r, row in enumerate(gridmap):
             for c, ch in enumerate(row):
-                if ch != TILE_LAND:
+                if ch != TILE_TREE:
                     indices.append(r * canvas_width + c)
         return indices
 
@@ -769,19 +769,19 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             gridmap[r] = "".join(row)
 
     @classmethod
-    def _apply_land_prob(
+    def _apply_tree_prob(
         cls,
         rng: random.Random,
         gridmap: list[str],
-        land_prob: float,
+        tree_prob: float,
     ) -> None:
-        if land_prob <= 0.0:
+        if tree_prob <= 0.0:
             return
         for r, row in enumerate(gridmap):
             chars = list(row)
             for c, ch in enumerate(chars):
-                if ch == TILE_FROZEN and rng.random() < land_prob:
-                    chars[c] = TILE_LAND
+                if ch == TILE_FROZEN and rng.random() < tree_prob:
+                    chars[c] = TILE_TREE
             gridmap[r] = "".join(chars)
 
     @classmethod
@@ -813,15 +813,13 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         start_pos_prob: float | None,
         goal_pos: int | list[int] | None,
         goal_pos_prob: float | None,
-        land_prob: float,
+        tree_prob: float,
         glare_prob: float,
         sleigh_pair_count: int,
-        min_playable_tiles: int | None,
-        max_playable_tiles: int | None,
     ) -> list[str]:
         canvas_width = max_width
         canvas_height = max_height
-        mask = ProceduralFrozenLakeEnv._generate_playable_mask(
+        mask = ProceduralFrozenLakeEnv._generate_lake_mask(
             rng,
             canvas_width=canvas_width,
             canvas_height=canvas_height,
@@ -829,26 +827,27 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             max_width=max_width,
             min_height=min_height,
             max_height=max_height,
-            min_playable_tiles=min_playable_tiles,
-            max_playable_tiles=max_playable_tiles,
         )
         gridmap = ProceduralFrozenLakeEnv._mask_to_base_gridmap(mask, canvas_width)
-        ProceduralFrozenLakeEnv._apply_land_prob(rng, gridmap, land_prob)
-        playable_count = sum(ch != TILE_LAND for row in gridmap for ch in row)
-        lo_tiles, hi_tiles, _, _ = ProceduralFrozenLakeEnv._resolve_playable_bounds(
-            min_width,
-            max_width,
-            min_height,
-            max_height,
-            canvas_width,
-            canvas_height,
-            min_playable_tiles,
-            max_playable_tiles,
-        )
-        if playable_count < lo_tiles or playable_count > hi_tiles:
-            raise RuntimeError("Generated playable region outside tile bounds.")
+        ProceduralFrozenLakeEnv._apply_tree_prob(rng, gridmap, tree_prob)
 
         available_index = ProceduralFrozenLakeEnv._playable_indices(gridmap, canvas_width)
+        if len(available_index) < 2:
+            raise RuntimeError(
+                "Carved lake has fewer than 2 playable tiles (need a start and a goal)."
+            )
+
+        def place_tiles(positions: list[int], tile: str, name: str) -> None:
+            for p in positions:
+                if p not in available_index:
+                    raise RuntimeError(
+                        f"{name} {p} is not on playable lake ice for this map."
+                    )
+                r, c = divmod(p, canvas_width)
+                row = list(gridmap[r])
+                row[c] = tile
+                gridmap[r] = "".join(row)
+                available_index.remove(p)
 
         if isinstance(start_pos, int):
             start_positions: list[int] | None = [start_pos]
@@ -862,13 +861,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             start_positions = [
                 i for i in available_index if rng.random() < start_pos_prob
             ]
-        for p in start_positions or []:
-            if p in available_index:
-                r, c = divmod(p, canvas_width)
-                row = list(gridmap[r])
-                row[c] = TILE_START
-                gridmap[r] = "".join(row)
-                available_index.remove(p)
+        place_tiles(start_positions or [], TILE_START, "start_pos")
 
         if isinstance(goal_pos, int):
             goal_positions: list[int] | None = [goal_pos]
@@ -882,13 +875,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             goal_positions = [
                 i for i in available_index if rng.random() < goal_pos_prob
             ]
-        for p in goal_positions or []:
-            if p in available_index:
-                r, c = divmod(p, canvas_width)
-                row = list(gridmap[r])
-                row[c] = TILE_GOAL
-                gridmap[r] = "".join(row)
-                available_index.remove(p)
+        place_tiles(goal_positions or [], TILE_GOAL, "goal_pos")
 
         for i in list(available_index):
             if rng.random() < hole_prob:
@@ -914,17 +901,22 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         max_tries: int,
         **kwargs: Any,
     ) -> list[str]:
+        last_error: str | None = None
         for _ in range(max_tries):
             try:
                 gridmap = cls._generate_map(rng=rng, **kwargs)
-            except RuntimeError:
+            except RuntimeError as exc:
+                last_error = str(exc)
                 continue
             if cls._map_is_valid(gridmap, min_hops=min_hops):
                 return gridmap
-        raise RuntimeError(
+        message = (
             "Could not generate a valid Procedural Frozen Lake map. "
             "Try lower hole_prob, lower min_hops, or larger dimensions."
         )
+        if last_error is not None:
+            message += f" Last generation failure: {last_error}"
+        raise RuntimeError(message)
 
     def compute_q_table(
         self,
@@ -933,13 +925,22 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     ) -> np.ndarray:
         self._require_map_initialized()
         n_s = int(self.nrow * self.ncol)
+        absorbing_tiles = {TILE_GOAL, TILE_HOLE, TILE_TREE}
+        terminal_states = {
+            self._state_index(r, c)
+            for r in range(self.nrow)
+            for c in range(self.ncol)
+            if self._decode_grid_char(self.desc[r, c]) in absorbing_tiles
+        }
+        # P rewards include the env step penalty; strip it so Q* reflects only the
+        # goal rewards, discounted by q_star_gamma to prefer shorter paths.
         return solve_tabular_mdp(
             P=self.P,
             n_states=n_s,
             n_actions=4,
-            gamma=float(self.gamma),
-            step_penalty=float(self._q_star_step_penalty),
-            goal_rewards_by_state=self._goal_rewards_by_state,
+            gamma=float(self.q_star_gamma),
+            step_penalty=-float(self._step_penalty),
+            terminal_states=terminal_states,
             max_iter=max_iter,
             tolerance=tolerance,
         )
@@ -1072,12 +1073,17 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             )
         return None
 
+    def _display_char_for_cell(self, row: int, col: int) -> str:
+        if self.fog_of_war:
+            return self._fog_display_char(row, col)
+        return self._decode_cell(self.desc[row, col])
+
     def _ansi_char_for_cell(self, row: int, col: int) -> str:
         from gymnasium import utils
 
-        ch = self._fog_display_char(row, col)
+        ch = self._display_char_for_cell(row, col)
         colors = {
-            TILE_LAND: "white",
+            TILE_TREE: "white",
             TILE_GLARE: "cyan",
             TILE_SLEIGH: "blue",
             TILE_HOLE: "blue",
@@ -1087,7 +1093,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         color = colors.get(ch)
         if color is None:
             return ch
-        return utils.colorize(ch, color, bold=(ch in {TILE_LAND, TILE_SLEIGH}))
+        return utils.colorize(ch, color, bold=(ch in {TILE_TREE, TILE_SLEIGH}))
 
     def _ensure_tile_icons(self) -> dict[str, Any]:
         cell_size = (int(self.cell_size[0]), int(self.cell_size[1]))
@@ -1228,40 +1234,16 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         from contextlib import closing
         from io import StringIO
 
-        outfile = StringIO()
-        row, col = self._obs_to_row_col(int(self.s))
-        if self.fog_of_war:
-            desc = [
-                [self._ansi_char_for_cell(y, x) for x in range(self.ncol)]
-                for y in range(self.nrow)
-            ]
-        else:
-            from gymnasium import utils
-
-            raw = [
-                [self._decode_cell(self.desc[y, x]) for x in range(self.ncol)]
-                for y in range(self.nrow)
-            ]
-            desc = [
-                [
-                    utils.colorize(ch, color, bold=True)
-                    if (color := {
-                        TILE_LAND: "white",
-                        TILE_GLARE: "cyan",
-                        TILE_SLEIGH: "blue",
-                    }.get(ch))
-                    is not None
-                    else ch
-                    for ch in row_chars
-                ]
-                for row_chars in raw
-            ]
         from gymnasium import utils
 
+        outfile = StringIO()
+        row, col = self._obs_to_row_col(int(self.s))
+        desc = [
+            [self._ansi_char_for_cell(y, x) for x in range(self.ncol)]
+            for y in range(self.nrow)
+        ]
         desc[row][col] = utils.colorize(
-            self._fog_display_char(row, col) if self.fog_of_war else self._decode_cell(self.desc[row, col]),
-            "red",
-            highlight=True,
+            self._display_char_for_cell(row, col), "red", highlight=True
         )
         if self.lastaction is not None:
             outfile.write(f"  ({['Left', 'Down', 'Right', 'Up'][self.lastaction]})\n")
@@ -1270,6 +1252,19 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         outfile.write("\n".join("".join(line) for line in desc) + "\n")
         with closing(outfile):
             return outfile.getvalue()
+
+    def _external_obs(self, state: int) -> int:
+        return self._obs_perm[state] if self._obs_perm is not None else state
+
+    def _internal_action(self, action: int) -> int:
+        return self._action_perm[action] if self._action_perm is not None else action
+
+    def _emit_q_star_vector(self, state: int) -> np.ndarray:
+        """Q-values for the current internal state, ordered by external action id."""
+        q = self._q_star_for_obs(state)
+        if self._action_perm is not None:
+            q = q[np.asarray(self._action_perm)]
+        return q
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         reset_options = dict(options or {})
@@ -1281,42 +1276,54 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         else:
             self._ensure_map_initialized()
         obs, info = super().reset(seed=seed, options=reset_options or None)
+        obs = int(obs)
         self._ensure_fog_initialized()
-        self._mark_visited(int(obs))
+        self._mark_visited(obs)
         info = dict[str, Any](info)
         if self._map_dirty:
-            if self.emit_map:
-                info["map"] = self._map_info
             if self.emit_q_star:
                 self._q_table = self.compute_q_table()
             self._map_dirty = False
+        if self.emit_map:
+            info["map"] = self._map_info
         if self.emit_q_star:
-            info["q_star"] = self._q_star_for_obs(int(obs))
-        return obs, info
+            info["q_star"] = self._emit_q_star_vector(obs)
+        return self._external_obs(obs), info
 
     def step(self, a: Any):
         self._require_map_initialized()
+        action = self._internal_action(int(a))
         old_obs = int(self.s)
         old_row, old_col = self._obs_to_row_col(old_obs)
-        obs, reward, terminated, truncated, info = super().step(a)
-        obs = int(obs)
+
+        # Sample the transition ourselves (mirroring FrozenLakeEnv.step) so we know
+        # which movement direction was actually taken — needed for fog of war to
+        # reveal the tile really bumped into when a glare slip goes sideways.
+        transitions = self.P[old_obs][action]
+        idx = categorical_sample([t[0] for t in transitions], self.np_random)
+        prob, new_state, reward, terminated = transitions[idx]
+        self.s = new_state
+        self.lastaction = action
+        if self.render_mode == "human":
+            self.render()
+
+        obs = int(new_state)
         self._mark_visited(obs)
         if obs == old_obs:
-            target_row, target_col = self._neighbor_from_action(old_row, old_col, int(a))
-            self._mark_visited_at(target_row, target_col)
-        if terminated and self._landed_on_goal(int(obs)):
-            reward = float(self._goal_rewards_by_state[int(obs)])
-        reward = float(reward) + self._step_penalty
-        info = dict[str, Any](info)
-        if self._map_dirty:
-            if self.emit_map:
-                info["map"] = self._map_info
-            if self.emit_q_star:
-                self._q_table = self.compute_q_table()
-            self._map_dirty = False
+            move_dir = self._transition_move_dirs[old_obs][action][idx]
+            if move_dir is not None:
+                target_row, target_col = self._neighbor_from_action(
+                    old_row, old_col, move_dir
+                )
+                self._mark_visited_at(target_row, target_col)
+        # P carries the exact env rewards (per-goal reward + step penalty baked in).
+        reward = float(reward)
+        info: dict[str, Any] = {"prob": prob}
+        if self.emit_map:
+            info["map"] = self._map_info
         if self.emit_q_star:
-            info["q_star"] = self._q_star_for_obs(int(obs))
-        return obs, reward, terminated, truncated, info
+            info["q_star"] = self._emit_q_star_vector(obs)
+        return self._external_obs(obs), reward, bool(terminated), False, info
 
     def close(self) -> None:
         if self._gridmap is None:
