@@ -46,6 +46,10 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     terminal transitions). Value iteration includes the same offset so ``q_star`` matches rollout
     rewards when ``emit_q_star`` is True.
 
+    With ``fog_of_war=True``, rendering hides every unvisited tile as ``?``; stepping onto
+    a cell reveals it for the lifetime of the current map. Exploration persists across
+    episode ``reset()`` calls and clears only when the map regenerates.
+
     """
 
     def __init__(
@@ -70,6 +74,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         goal_reward_high: float = 1.0,
         step_penalty: float = 0.0,
         map_seed: int | None = None,
+        fog_of_war: bool = False,
     ):
         """
         Args:
@@ -106,6 +111,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             step_penalty: Scalar added to the reward on every step (e.g. ``-0.01`` for a
                 step cost). Also applied inside value iteration so ``q_star`` matches.
             map_seed: Random seed for map generation. ``None`` = non-deterministic.
+            fog_of_war: When ``True``, unvisited tiles render as ``?`` until the agent
+                steps onto them. Visited tiles stay revealed across episode resets;
+                fog clears only when the map regenerates.
         """
         lo, hi = float(goal_reward_low), float(goal_reward_high)
         if lo > hi:
@@ -138,6 +146,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._map_info: str | None = None
         self._map_dirty = False
         self._q_table: np.ndarray | None = None
+        self.fog_of_war = bool(fog_of_war)
+        self._visited: np.ndarray | None = None
+        self._fog_font_obj: Any = None
         self.action_space = gym.spaces.Discrete(4)
         fixed_rewards: Mapping[int | str, float] | None = None
         if fixed_map is not None:
@@ -173,6 +184,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._map_info = to_json_str(self._make_map_info_dict())
         self._map_dirty = True
         self._q_table = None
+        self._clear_fog()
 
     def _regenerate_map(self) -> None:
         gridmap = self._generate_valid_map(
@@ -469,6 +481,125 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             return fallback
         return np.asarray(self._q_table[state], dtype=np.float64).copy()
 
+    def _clear_fog(self) -> None:
+        if not self.fog_of_war:
+            self._visited = None
+            return
+        self._visited = np.zeros((self.nrow, self.ncol), dtype=bool)
+
+    def _ensure_fog_initialized(self) -> None:
+        if not self.fog_of_war:
+            self._visited = None
+            return
+        shape = (self.nrow, self.ncol)
+        if self._visited is None or self._visited.shape != shape:
+            self._visited = np.zeros(shape, dtype=bool)
+
+    def _mark_visited(self, state: int) -> None:
+        if not self.fog_of_war or self._visited is None:
+            return
+        row, col = divmod(int(state), int(self.ncol))
+        self._visited[row, col] = True
+
+    @staticmethod
+    def _decode_cell(cell: Any) -> str:
+        if isinstance(cell, bytes):
+            return cell.decode("utf-8")
+        if isinstance(cell, str):
+            return cell
+        return bytes(cell).decode("utf-8")
+
+    def _cell_is_hidden(self, row: int, col: int) -> bool:
+        return (
+            self.fog_of_war
+            and self._visited is not None
+            and not self._visited[row, col]
+        )
+
+    def _fog_display_char(self, row: int, col: int) -> str:
+        if self._cell_is_hidden(row, col):
+            return "?"
+        return self._decode_cell(self.desc[row, col])
+
+    def _fog_desc_for_render(self) -> np.ndarray:
+        fog_desc = self.desc.copy()
+        if not self.fog_of_war or self._visited is None:
+            return fog_desc
+        for row in range(self.nrow):
+            for col in range(self.ncol):
+                if self._cell_is_hidden(row, col):
+                    fog_desc[row, col] = b"F"
+        return fog_desc
+
+    def _get_fog_font(self) -> Any:
+        if self._fog_font_obj is None:
+            import pygame  # type: ignore[import-untyped]
+
+            self._fog_font_obj = pygame.font.SysFont("dejavusans", max(16, self.cell_size[1] // 2))
+        return self._fog_font_obj
+
+    def _draw_fog_question_marks(self, mode: str) -> np.ndarray | None:
+        if not self.fog_of_war or self._visited is None or self.window_surface is None:
+            return None
+        import pygame  # type: ignore[import-untyped]
+
+        font = self._get_fog_font()
+        for row in range(self.nrow):
+            for col in range(self.ncol):
+                if not self._cell_is_hidden(row, col):
+                    continue
+                text = font.render("?", True, (40, 40, 40))
+                text_rect = text.get_rect(
+                    center=(
+                        col * self.cell_size[0] + self.cell_size[0] // 2,
+                        row * self.cell_size[1] + self.cell_size[1] // 2,
+                    )
+                )
+                self.window_surface.blit(text, text_rect)
+        if mode == "human":
+            pygame.display.update()
+            return None
+        if mode == "rgb_array":
+            return np.transpose(
+                np.array(pygame.surfarray.pixels3d(self.window_surface)),
+                axes=(1, 0, 2),
+            )
+        return None
+
+    def _render_gui(self, mode: str) -> np.ndarray | None:
+        if not self.fog_of_war:
+            return super()._render_gui(mode)
+        original_desc = self.desc
+        self.desc = self._fog_desc_for_render()
+        try:
+            super()._render_gui(mode)
+        finally:
+            self.desc = original_desc
+        return self._draw_fog_question_marks(mode)
+
+    def _render_text(self) -> str:
+        if not self.fog_of_war:
+            return super()._render_text()
+        from contextlib import closing
+        from io import StringIO
+
+        from gymnasium import utils
+
+        outfile = StringIO()
+        row, col = self.s // self.ncol, self.s % self.ncol
+        desc = [
+            [self._fog_display_char(y, x) for x in range(self.ncol)]
+            for y in range(self.nrow)
+        ]
+        desc[row][col] = utils.colorize(desc[row][col], "red", highlight=True)
+        if self.lastaction is not None:
+            outfile.write(f"  ({['Left', 'Down', 'Right', 'Up'][self.lastaction]})\n")
+        else:
+            outfile.write("\n")
+        outfile.write("\n".join("".join(line) for line in desc) + "\n")
+        with closing(outfile):
+            return outfile.getvalue()
+
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         reset_options = dict(options or {})
         regenerate_map = bool(reset_options.pop("regenerate_map", False))
@@ -479,6 +610,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         else:
             self._ensure_map_initialized()
         obs, info = super().reset(seed=seed, options=reset_options or None)
+        self._ensure_fog_initialized()
+        self._mark_visited(int(obs))
         info = dict[str, Any](info)
         if self._map_dirty:
             if self.emit_map:
@@ -493,6 +626,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     def step(self, a: Any):
         self._require_map_initialized()
         obs, reward, terminated, truncated, info = super().step(a)
+        self._mark_visited(int(obs))
         if terminated and self._landed_on_goal(int(obs)):
             reward = float(self._goal_rewards_by_state[int(obs)])
         reward = float(reward) + self._step_penalty

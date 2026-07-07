@@ -127,3 +127,127 @@ def test_q_star_matches_compute_q_table() -> None:
         assert np.allclose(info["q_star"], expected[obs])
     finally:
         env.close()
+
+
+def test_same_map_is_reused_without_regenerate_option() -> None:
+    env = gym.make(
+        PROCEDURAL_FROZENLAKE_ENV_ID,
+        emit_map=True,
+        map_seed=7,
+    )
+    try:
+        env.reset(seed=1)
+        first_map = list(env.unwrapped._gridmap or [])
+        env.step(env.action_space.sample())
+        env.reset(seed=2)
+        second_map = list(env.unwrapped._gridmap or [])
+        assert first_map
+        assert first_map == second_map
+    finally:
+        env.close()
+
+
+def test_fog_of_war_hides_all_unvisited_tiles() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=[
+            "SFG",
+            "FFF",
+            "FHF",
+        ],
+        fog_of_war=True,
+        render_mode="ansi",
+    )
+    try:
+        env.reset(seed=0)
+        assert env._fog_display_char(0, 0) == "S"
+        assert env._fog_display_char(0, 1) == "?"
+        assert env._fog_display_char(0, 2) == "?"
+        assert env._fog_display_char(1, 1) == "?"
+        assert env._fog_display_char(2, 1) == "?"
+        render_out = env.render()
+        assert isinstance(render_out, str)
+        assert "?" in render_out
+        assert "H" not in render_out
+        assert "G" not in render_out
+        visited = env._visited
+        assert visited is not None
+        assert visited[0, 0]
+        assert not visited[0, 1]
+    finally:
+        env.close()
+
+
+def test_fog_of_war_reveals_cells_when_visited() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=[
+            "SFG",
+            "FFF",
+            "FHF",
+        ],
+        fog_of_war=True,
+        render_mode="ansi",
+    )
+    try:
+        env.reset(seed=0)
+        env.step(2)  # onto (0, 1)
+        assert env._fog_display_char(0, 1) == "F"
+        env.step(2)  # onto goal
+        visited = env._visited
+        assert visited is not None
+        assert visited[0, 2]
+        assert env._fog_display_char(0, 2) == "G"
+        assert env._fog_display_char(2, 1) == "?"
+    finally:
+        env.close()
+
+
+def test_fog_of_war_persists_across_episode_reset() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=[
+            "SFG",
+            "FFF",
+            "FHF",
+        ],
+        fog_of_war=True,
+        render_mode="ansi",
+    )
+    try:
+        env.reset(seed=0)
+        env.step(2)
+        env.step(2)
+        visited = env._visited
+        assert visited is not None
+        assert visited[0, 2]
+        assert env._fog_display_char(0, 2) == "G"
+        env.reset(seed=1)
+        visited = env._visited
+        assert visited is not None
+        assert visited[0, 2]
+        assert env._fog_display_char(0, 2) == "G"
+        assert env._fog_display_char(2, 1) == "?"
+    finally:
+        env.close()
+
+
+def test_fog_of_war_clears_when_map_regenerates() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=None,
+        fog_of_war=True,
+        map_seed=7,
+        min_width=3,
+        max_width=3,
+        min_height=3,
+        max_height=3,
+        hole_prob=0.0,
+        min_hops=1,
+    )
+    try:
+        env.reset(seed=0)
+        assert env._visited is not None
+        env._visited.fill(True)
+        env.reset(seed=1, options={"regenerate_map": True})
+        visited = env._visited
+        assert visited is not None
+        assert visited.sum() == 1
+    finally:
+        env.close()

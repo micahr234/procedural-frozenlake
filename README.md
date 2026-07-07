@@ -1,5 +1,7 @@
 # Procedural Frozen Lake
 
+<p align="center"><img src="frozenlake.png" width="400"/></p>
+
 A Gymnasium environment that extends Frozen Lake with **procedurally generated maps**.
 
 `Procedural-FrozenLake-v1` provides:
@@ -10,6 +12,13 @@ A Gymnasium environment that extends Frozen Lake with **procedurally generated m
 - **Fresh maps on reset** — pass `options={"regenerate_map": True}` to sample a new valid layout without rebuilding the env.
 - **Stable observation space** — variable-size maps share a fixed `Discrete(max_width * max_height)` space so it does not change when maps regenerate.
 - **Optional supervision signals** — `emit_map=True` and `emit_q_star=True` expose the layout and optimal Q-values in `info`.
+- **Fog of war rendering** — `fog_of_war=True` hides unvisited tiles as `?`; exploration persists across episode resets until the map regenerates.
+
+## News
+
+- **2026-07-07 — Fog of war** — `fog_of_war=True` hides every unvisited tile as `?` in `ansi`, `human`, and `rgb_array` rendering. Tiles stay revealed once visited; exploration carries over across episode `reset()` calls and clears only when the map regenerates.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Install
 
@@ -53,13 +62,13 @@ for _ in range(100):
 env.close()
 ```
 
-See [`examples/random_rollout.ipynb`](examples/random_rollout.ipynb) for a worked example.
+See [`examples/random_rollout.ipynb`](examples/random_rollout.ipynb) for a tutorial notebook: multi-episode rollout, fog-of-war, Q\* labels, and an embedded replay video.
 
 ## Environment
 
 **ID:** `Procedural-FrozenLake-v1`
 
-Maps are generated lazily on the first `reset()`, not during construction. By default, each env instance keeps one generated map across resets.
+Maps are generated lazily on the first `reset()`, not during construction. **By default, the same map is reused across episodes** — only pass `options={"regenerate_map": True}` when you want a fresh layout. `reset(seed=…)` still controls episode-level randomness (e.g. start sampling when slippery); it does not regenerate the map unless you ask.
 
 ### Constructor parameters
 
@@ -78,6 +87,7 @@ Maps are generated lazily on the first `reset()`, not during construction. By de
 | `goal_reward_low`, `goal_reward_high` | `1.0`, `1.0` | Per-goal reward sampling bounds |
 | `step_penalty` | `0.0` | Added to every step reward (e.g. `-0.01`) |
 | `map_seed` | `None` | Seed for map generation (independent of reset seed) |
+| `fog_of_war` | `False` | Hide unvisited tiles as `?` (persists across resets until map regenerates) |
 
 ### Reset options
 
