@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "procedural-frozenlake"
-version = "0.2.0"
+version = "0.3.0"
 description = "Procedural Frozen Lake — a Gymnasium environment with generated maps"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -45,7 +45,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.setuptools.package-data]
-procedural_frozenlake = ["py.typed"]
+procedural_frozenlake = ["py.typed", "img/*.png"]
 
 [tool.setuptools]
 packages = ["procedural_frozenlake"]
