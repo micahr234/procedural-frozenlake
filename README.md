@@ -63,7 +63,7 @@ for _ in range(100):
 env.close()
 ```
 
-See [`examples/random_rollout.ipynb`](examples/random_rollout.ipynb) for a tutorial notebook: multi-episode rollout, fog-of-war, Q\* labels, and an embedded replay video.
+See [`examples/random_rollout.ipynb`](examples/random_rollout.ipynb) for a tutorial notebook: multi-episode rollout, multiple starts and goals with per-goal rewards, fog-of-war, Q\* labels, and an embedded replay video.
 
 ## Environment
 
@@ -96,7 +96,7 @@ Random maps use a fixed `max_height × max_width` canvas. Land (`L`) cells surro
 | `G` | Goal | Terminal — success |
 | `L` | Tree | Impassable shoreline and optional interior patches |
 
-In `human` / `rgb_array` rendering, `L` / `R` / `O` appear as pixel-art sprites drawn in the original FrozenLake style (snowy pine tree, almost-white polished ice patch with a star gleam, red sleigh with a reindeer) over the standard ice tile. Each sleigh also carries a small numbered color-coded badge in its bottom-left corner; linked sleighs share the same badge. ANSI mode colorizes those letters (white / cyan / blue).
+In `human` / `rgb_array` rendering, `L` / `R` / `O` appear as pixel-art sprites drawn in the original FrozenLake style (snowy pine tree, almost-white polished ice patch with a star gleam, red sleigh with a reindeer) over the standard ice tile. Each sleigh also carries a small numbered color-coded badge in its bottom-left corner; linked sleighs share the same badge. Goal presents show their reward in a badge, and the bow is tinted from yellow (low reward) to green (high reward) relative to the map's reward range. ANSI mode colorizes those letters (white / cyan / blue).
 
 Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — the dangerous patches on a frozen lake. For a fully slippery map like classic Gymnasium FrozenLake, use `glare_prob=1.0`.
 

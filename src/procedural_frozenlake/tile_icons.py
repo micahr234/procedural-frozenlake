@@ -351,3 +351,66 @@ def build_sleigh_pair_badges(
         pygame.transform.scale(_surface_from_pixels(_badge_pixels(i)), size)
         for i in range(pair_count)
     ]
+
+
+# Reward color scale for goal presents: yellow (low) → green (high).
+_REWARD_LOW: _Color = (235, 205, 50, 255)
+_REWARD_HIGH: _Color = (58, 172, 74, 255)
+
+# Badge colors matching the present's box blues.
+_GOAL_BADGE_FILL: _Color = (58, 63, 94, 255)
+_GOAL_BADGE_BORDER: _Color = (43, 43, 69, 255)
+
+# Brightness of the lightest bow tone in the original goal.png, used to
+# preserve the ribbon's shading when re-hueing it.
+_BOW_REF_BRIGHTNESS = 240 + 181 + 65
+
+
+def _reward_color(t: float) -> tuple[int, int, int]:
+    t = min(max(t, 0.0), 1.0)
+    return (
+        int(_REWARD_LOW[0] + (_REWARD_HIGH[0] - _REWARD_LOW[0]) * t),
+        int(_REWARD_LOW[1] + (_REWARD_HIGH[1] - _REWARD_LOW[1]) * t),
+        int(_REWARD_LOW[2] + (_REWARD_HIGH[2] - _REWARD_LOW[2]) * t),
+    )
+
+
+def _is_bow_pixel(r: int, g: int, b: int) -> bool:
+    # The gift bow is the only orange part of goal.png (box is blue).
+    return r > 120 and r > b + 50 and g < r
+
+
+def goal_reward_icon(
+    goal_surface: Any, t: float, reward_text: str, cell_size: tuple[int, int]
+) -> Any:
+    """Return the goal present with its bow tinted by reward and a reward badge.
+
+    ``goal_surface`` is the native (32x32) FrozenLake goal sprite; ``t`` in
+    [0, 1] blends the bow from yellow (low reward) to green (high reward).
+    """
+    import pygame
+
+    icon = goal_surface.copy()
+    w, h = icon.get_size()
+    target = _reward_color(t)
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = icon.get_at((x, y))
+            if a == 0 or not _is_bow_pixel(r, g, b):
+                continue
+            factor = min((r + g + b) / _BOW_REF_BRIGHTNESS, 1.0)
+            icon.set_at(
+                (x, y),
+                (
+                    int(target[0] * factor),
+                    int(target[1] * factor),
+                    int(target[2] * factor),
+                    a,
+                ),
+            )
+    badge = _surface_from_pixels(
+        _text_badge_pixels(reward_text, _GOAL_BADGE_FILL, _GOAL_BADGE_BORDER)
+    )
+    icon.blit(badge, (0, 0))
+    size = (int(cell_size[0]), int(cell_size[1]))
+    return pygame.transform.scale(icon, size)

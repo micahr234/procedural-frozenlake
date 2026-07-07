@@ -17,6 +17,7 @@ from procedural_frozenlake.tile_icons import (
     SPECIAL_TILES,
     build_sleigh_pair_badges,
     build_special_tile_icons,
+    goal_reward_icon,
 )
 from procedural_frozenlake.utils import to_json_str
 from procedural_frozenlake.value_iteration import solve_tabular_mdp
@@ -153,6 +154,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._tile_icons_cell_size: tuple[int, int] | None = None
         self._sleigh_badges: list[Any] | None = None
         self._sleigh_badges_key: tuple[tuple[int, int], int] | None = None
+        self._goal_icons: dict[int, Any] | None = None
+        self._goal_icons_key: Any = None
         self.action_space = gym.spaces.Discrete(4)
         fixed_rewards: Mapping[int | str, float] | None = None
         if fixed_map is not None:
@@ -1127,21 +1130,63 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             for state in pair
         }
 
+    def _goal_reward_scale_t(self, reward: float) -> float:
+        """Normalize a goal reward to [0, 1] for the yellow→green bow tint."""
+        lo, hi = self._goal_reward_low, self._goal_reward_high
+        if hi <= lo:
+            rewards = list(self._goal_rewards_by_state.values())
+            lo, hi = min(rewards), max(rewards)
+        if hi <= lo:
+            return 1.0
+        return (reward - lo) / (hi - lo)
+
+    def _ensure_goal_icons(self) -> dict[int, Any]:
+        cell_size = (int(self.cell_size[0]), int(self.cell_size[1]))
+        key = (cell_size, tuple(sorted(self._goal_rewards_by_state.items())))
+        if self._goal_icons is not None and self._goal_icons_key == key:
+            return self._goal_icons
+        import pygame  # type: ignore[import-untyped]
+        from gymnasium.envs.toy_text import frozen_lake
+
+        goal_path = path.join(path.dirname(frozen_lake.__file__), "img", "goal.png")
+        raw = pygame.image.load(goal_path)
+        # No display may exist in rgb_array mode, so convert to a per-pixel
+        # alpha surface manually instead of convert_alpha().
+        goal_native = pygame.Surface(raw.get_size(), pygame.SRCALPHA)
+        goal_native.blit(raw, (0, 0))
+        icons: dict[int, Any] = {}
+        for state, reward in self._goal_rewards_by_state.items():
+            icons[state] = goal_reward_icon(
+                goal_native,
+                self._goal_reward_scale_t(reward),
+                f"{reward:.2f}",
+                cell_size,
+            )
+        self._goal_icons = icons
+        self._goal_icons_key = key
+        return icons
+
     def _draw_special_tiles(self) -> None:
         if self.window_surface is None:
             return
 
         icons = self._ensure_tile_icons()
         badges = self._ensure_sleigh_badges()
+        goal_icons = self._ensure_goal_icons()
         pair_index = self._sleigh_pair_index_by_state()
         for row in range(self.nrow):
             for col in range(self.ncol):
                 if self._cell_is_hidden(row, col):
                     continue
                 ch = self._decode_cell(self.desc[row, col])
+                pos = (col * self.cell_size[0], row * self.cell_size[1])
+                if ch == TILE_GOAL:
+                    goal_icon = goal_icons.get(self._state_index(row, col))
+                    if goal_icon is not None:
+                        self.window_surface.blit(goal_icon, pos)
+                    continue
                 if ch not in icons:
                     continue
-                pos = (col * self.cell_size[0], row * self.cell_size[1])
                 self.window_surface.blit(icons[ch], pos)
                 if ch == TILE_SLEIGH:
                     idx = pair_index.get(self._state_index(row, col))
@@ -1150,9 +1195,10 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
 
         # The parent render draws the elf before these icons are blitted, so an
         # agent standing on a special tile (e.g. just warped onto a sleigh)
-        # would be hidden underneath its icon. Redraw the elf on top.
+        # or on a goal would be hidden underneath its overlay. Redraw it on top.
         bot_row, bot_col = self._obs_to_row_col(int(self.s))
-        if self._decode_cell(self.desc[bot_row, bot_col]) in icons:
+        bot_ch = self._decode_cell(self.desc[bot_row, bot_col])
+        if bot_ch in icons or bot_ch == TILE_GOAL:
             last_action = self.lastaction if self.lastaction is not None else 1
             elf_img = self.elf_images[last_action]
             pos = (bot_col * self.cell_size[0], bot_row * self.cell_size[1])

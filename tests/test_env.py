@@ -669,6 +669,38 @@ def test_sleigh_pair_badges_mark_pairs() -> None:
         env.close()
 
 
+def test_goal_reward_tint_and_badge() -> None:
+    import os
+
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    env = ProceduralFrozenLakeEnv(
+        fixed_map={
+            "board": [
+                "SFGFG",
+                "FFFFF",
+            ],
+            "rewards": {2: 0.1, 4: 1.5},
+        },
+        render_mode="rgb_array",
+    )
+    try:
+        env.reset(seed=0)
+        frame = env.render()
+        cell_w, cell_h = env.cell_size
+
+        low = frame[0:cell_h, 2 * cell_w : 3 * cell_w]
+        high = frame[0:cell_h, 4 * cell_w : 5 * cell_w]
+        # Different rewards produce different bow tints and badge text.
+        assert (low != high).any()
+        # Low-reward bow is yellow (red ≈ green); high-reward bow is green.
+        assert (low[:, :, 0].astype(int) - low[:, :, 1].astype(int)).max() < 80
+        green_dominant = high[:, :, 1].astype(int) - high[:, :, 0].astype(int)
+        assert green_dominant.max() > 80
+    finally:
+        env.close()
+
+
 def test_elf_visible_on_sleigh_after_warp() -> None:
     import os
 

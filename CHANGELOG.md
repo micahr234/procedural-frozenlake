@@ -7,12 +7,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - Sleigh tiles now show a small numbered color-coded badge in the bottom-left corner in GUI rendering; both sleighs of a warp pair share the same badge, so linked pairs can be identified on the map.
+- Goal presents render their reward value in a badge on the tile, and the present's bow is tinted by reward — yellow for low, green for high, normalized over the map's goal reward range (`goal_reward_low`/`goal_reward_high` when they differ, otherwise the rewards present on the map).
 
 ### Fixed
 - The agent (elf) is now redrawn on top of special tile icons in GUI rendering. Previously it was hidden underneath the tile sprite when standing on an `L`/`R`/`O` cell — most visibly after a sleigh warp, which made warps look like they didn't happen.
 - Under fog of war, warping through a sleigh now reveals both sleighs of the pair. Previously only the destination was marked visited, so the sleigh the agent entered stayed hidden as `?` until stepped on again.
 
 ### Changed
+- Example notebook now generates a map with multiple start and goal tiles (`start_pos_prob` / `goal_pos_prob`) and varied per-goal rewards (`goal_reward_low=0.5`, `goal_reward_high=1.5`), and prints each goal's reward under the text map.
 - Renamed ice floes to **sleighs**: `floe_pair_count` constructor parameter is now `sleigh_pair_count`, and the `info["map"]` JSON key `floes` is now `sleighs`. Tile letter (`O`) and warp behavior are unchanged.
 - Redrew the special tile icons as 32×32 pixel-art sprites matching the original Gymnasium FrozenLake art style: land (`L`) is a snowy pine tree, glare ice (`R`) is an almost-white polished ice patch with a star gleam, and sleighs (`O`) are a red sleigh with a reindeer. Sprites have transparent backgrounds and are composited over the standard ice tile with nearest-neighbor scaling.
 - Q\* value iteration now uses a separate `q_star_step_penalty` (default: match `step_penalty` when set, otherwise `-1e-6`) so optimal labels prefer shorter paths even when the live environment has no per-step cost — e.g. when an episode step limit would otherwise make wall-bumping look optimal.
