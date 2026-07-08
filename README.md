@@ -84,16 +84,10 @@ Maps are generated lazily on the first `reset()`, not during construction. **By 
 | <img src="docs/tile_legend/s.png" width="40" alt="Start tile"/> | `S` | Start | Walkable; deterministic movement |
 | <img src="docs/tile_legend/f.png" width="40" alt="Frozen tile"/> | `F` | Frozen | Normal safe ice; deterministic movement |
 | <img src="docs/tile_legend/m.png" width="40" alt="Mirror ice tile"/> | `M` | Mirror ice | Slippery ice (stochastic sliding when standing on it) |
-| <img src="docs/tile_legend/w.png" width="40" alt="Warp sleigh tile"/> | `W` | Warp sleigh | Warp to paired sleigh on entry (row-major pairing) |
+| <img src="docs/tile_legend/w.png" width="40" alt="Warp sleigh tile"/> | `W` | Warp sleigh | Warp to paired sleigh on entry; both tiles in a pair share the same numbered badge |
 | <img src="docs/tile_legend/h.png" width="40" alt="Hole tile"/> | `H` | Hole | Terminal — fall through |
-| <img src="docs/tile_legend/g.png" width="40" alt="Goal tile"/> | `G` | Goal | Terminal — success |
+| <img src="docs/tile_legend/g.png" width="40" alt="Goal tile"/> | `G` | Goal | Terminal — success; reward shown in badge, bow tinted yellow (low) to green (high) |
 | <img src="docs/tile_legend/t.png" width="40" alt="Tree tile"/> | `T` | Tree | Impassable shoreline and optional interior patches |
-
-Icons above match `human` / `rgb_array` rendering (ice base tile plus overlay). Sleigh pairs show a numbered badge; goal presents show their reward in a badge with a bow tinted from yellow (low) to green (high). ANSI mode colorizes letters the same with fog on or off: trees white, mirror ice cyan, sleighs and holes blue, goals green, starts yellow.
-
-Mirror ice is slippery because of a thin meltwater film on mirror-smooth ice — the dangerous patches on a frozen lake. `glare_prob=1.0` gives a map similar to the classic slippery Gymnasium FrozenLake (start tiles stay deterministic; only plain frozen tiles become mirror ice).
-
-Regenerate the legend previews after changing tile art: `bash scripts/generate_legend_tiles.sh`.
 
 ### Constructor parameters
 
