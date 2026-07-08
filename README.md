@@ -81,13 +81,13 @@ Maps are generated lazily on the first `reset()`, not during construction. **By 
 
 | Icon | Tile | Name | Behavior |
 |:----:|:----:|------|----------|
-| <img src="docs/tile_legend/s.png" width="40" alt="Start tile"/> | `S` | Start | Walkable; deterministic movement |
-| <img src="docs/tile_legend/f.png" width="40" alt="Frozen tile"/> | `F` | Frozen | Normal safe ice; deterministic movement |
-| <img src="docs/tile_legend/m.png" width="40" alt="Mirror ice tile"/> | `M` | Mirror ice | Slippery ice (stochastic sliding when standing on it) |
-| <img src="docs/tile_legend/w.png" width="40" alt="Warp sleigh tile"/> | `W` | Warp sleigh | Warp to paired sleigh on entry; both tiles in a pair share the same numbered badge |
-| <img src="docs/tile_legend/h.png" width="40" alt="Hole tile"/> | `H` | Hole | Terminal — fall through |
-| <img src="docs/tile_legend/g.png" width="40" alt="Goal tile"/> | `G` | Goal | Terminal — success; reward shown in badge, bow tinted yellow (low) to green (high) |
-| <img src="docs/tile_legend/t.png" width="40" alt="Tree tile"/> | `T` | Tree | Impassable shoreline and optional interior patches |
+| <img src="src/procedural_frozenlake/img/tile_s.png" width="40" alt="Start tile"/> | `S` | Start | Walkable; deterministic movement |
+| <img src="src/procedural_frozenlake/img/tile_f.png" width="40" alt="Frozen tile"/> | `F` | Frozen | Normal safe ice; deterministic movement |
+| <img src="src/procedural_frozenlake/img/tile_m.png" width="40" alt="Mirror ice tile"/> | `M` | Mirror ice | Slippery ice (stochastic sliding when standing on it) |
+| <img src="src/procedural_frozenlake/img/tile_w.png" width="40" alt="Warp sleigh tile"/> | `W` | Warp sleigh | Warp to paired sleigh on entry; both tiles in a pair share the same numbered badge |
+| <img src="src/procedural_frozenlake/img/tile_h.png" width="40" alt="Hole tile"/> | `H` | Hole | Terminal — fall through |
+| <img src="src/procedural_frozenlake/img/tile_g.png" width="40" alt="Goal tile"/> | `G` | Goal | Terminal — success; reward shown in badge, bow tinted yellow (low) to green (high) |
+| <img src="src/procedural_frozenlake/img/tile_t.png" width="40" alt="Tree tile"/> | `T` | Tree | Impassable shoreline and optional interior patches |
 
 ### Constructor parameters
 

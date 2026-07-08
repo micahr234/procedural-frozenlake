@@ -38,9 +38,9 @@ PLAYABLE_TILES = frozenset(
 ALLOWED_TILES = PLAYABLE_TILES | {TILE_TREE}
 
 _TILE_ICON_FILES = {
-    TILE_TREE: "tree.png",
-    TILE_GLARE: "glare_ice.png",
-    TILE_SLEIGH: "sleigh.png",
+    TILE_TREE: "tile_t.png",
+    TILE_GLARE: "tile_m.png",
+    TILE_SLEIGH: "tile_w_overlay.png",
 }
 
 def _validate_prob(name: str, value: float) -> float:
