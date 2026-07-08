@@ -861,8 +861,8 @@ def test_p_matrix_carries_real_rewards() -> None:
         env.close()
 
 
-def test_q_star_ignores_env_step_penalty() -> None:
-    """q_star reflects discounted goal rewards only, not the env's step_penalty."""
+def test_q_star_includes_env_step_penalty() -> None:
+    """q_star is the optimal value of the live MDP: step_penalty from P is included."""
     env = ProceduralFrozenLakeEnv(
         fixed_map=["SFG"],
         step_penalty=-0.5,
@@ -871,8 +871,10 @@ def test_q_star_ignores_env_step_penalty() -> None:
     try:
         env.reset(seed=0)
         q = env.compute_q_table()
-        # Two steps to the goal: 0.999^1 * 1.0, with no -0.5s mixed in.
-        assert q[0, 2] == pytest.approx(0.999)
+        # From F: goal reward 1.0 plus step penalty -0.5. From S: another -0.5,
+        # with the final +0.5 discounted one step.
+        assert q[1, 2] == pytest.approx(0.5)
+        assert q[0, 2] == pytest.approx(-0.5 + 0.999 * 0.5)
         assert env.q_star_gamma == pytest.approx(0.999)
     finally:
         env.close()

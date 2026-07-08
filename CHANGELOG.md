@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- Runtime fallback that regenerated the `T`/`M`/`W` tile sprites in-process when the packaged PNGs were missing. The icons are static assets shipped with the package; rendering now assumes they exist. Regenerate them during development with `scripts/generate_tile_icons.sh`. The unused `build_special_tile_icons` helper was removed from `tile_icons`.
+- `playable_count` field from the `info["map"]` JSON. It counted every non-tree tile (including holes) and nothing consumed it since the `min_playable_tiles`/`max_playable_tiles` rejection logic was removed.
+
 ## [0.4.0] - 2026-07-07
 
 ### Added
@@ -30,7 +34,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Example notebook now generates a map with multiple start and goal tiles (`start_pos_prob` / `goal_pos_prob`) and varied per-goal rewards (`goal_reward_low=0.5`, `goal_reward_high=1.5`), and prints each goal's reward under the text map.
 - Renamed ice floes to **sleighs**: `floe_pair_count` constructor parameter is now `sleigh_pair_count`, and the `info["map"]` JSON key `floes` is now `sleighs`. Warp behavior is unchanged; the tile letter changed from `O` to `W` as part of the tile-letter rename above.
 - Redrew the special tile icons as 32×32 pixel-art sprites matching the original Gymnasium FrozenLake art style: tree (`T`) is a snowy pine, glare ice (`M`) is an almost-white polished ice patch with a star gleam, and sleighs (`W`) are a red sleigh with a reindeer. Sprites have transparent backgrounds and are composited over the standard ice tile with nearest-neighbor scaling.
-- Q\* value iteration now discounts with a new `q_star_gamma` constructor parameter (default `0.999`) instead of a per-step penalty, and strips the env's `step_penalty` out of the rewards. `info["q_star"]` is therefore a clean directional signal — discounted goal rewards that always prefer shorter paths — unaffected by live reward shaping.
+- Q\* value iteration now discounts with a new `q_star_gamma` constructor parameter (default `0.999`) instead of a per-step penalty, solving `env.P` as-is. Since `P` carries the exact env rewards (per-goal reward plus `step_penalty`), `info["q_star"]` is the true optimal value of the live MDP, and discounting keeps it pointed toward shorter paths.
 - Constructor parameters are now validated: `hole_prob`, `tree_prob`, `glare_prob`, `slippery_success_rate`, `start_pos_prob`, and `goal_pos_prob` must be in `[0, 1]`; width/height bounds must satisfy `1 <= min <= max`; `sleigh_pair_count` must be non-negative; `q_star_gamma` must be in `(0, 1]`. Invalid values raise `ValueError` at construction instead of corrupting `P` or failing deep inside generation.
 - Passing `start_pos`, `start_pos_prob`, `goal_pos`, or `goal_pos_prob` together with `fixed_map` now raises `ValueError`. Previously they were silently ignored.
 

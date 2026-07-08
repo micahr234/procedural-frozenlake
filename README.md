@@ -18,7 +18,7 @@ A Gymnasium environment that extends Frozen Lake with **procedurally generated m
 
 ## News
 
-- **2026-07-07 — v0.4.0** — New tile letters (`T`/`M`/`W`), fog of war on by default, observation/action permutations, `env.P` carries exact rewards, Q\* discounted by `q_star_gamma`, constructor validation, lake envelope placement. See [CHANGELOG.md](CHANGELOG.md).
+- **2026-07-07 — v0.4.0 is out!** — Observation and action permutations (`permute_obs` / `permute_actions`): state indices and action ids are relabeled with random permutations sampled alongside the map, so agents can't rely on canonical numbering. Also: new tile letters (`T`/`M`/`W`), fog of war on by default, `env.P` carries exact rewards, Q\* discounted by `q_star_gamma`, constructor validation, lake envelope placement. See [CHANGELOG.md](CHANGELOG.md).
 - **2026-07-07 — v0.3.0** — Variable map boundaries (land shorelines, glare ice, ice floe warps), fixed `max_width × max_height` canvas, tile-driven slipperiness. See [CHANGELOG.md](CHANGELOG.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
@@ -73,21 +73,6 @@ See [`examples/random_rollout.ipynb`](examples/random_rollout.ipynb) for a tutor
 
 Maps are generated lazily on the first `reset()`, not during construction. **By default, the same map is reused across episodes** — only pass `options={"regenerate_map": True}` when you want a fresh layout. `reset(seed=…)` still controls episode-level randomness (e.g. start sampling); it does not regenerate the map unless you ask.
 
-### Observation space
-
-**Always** `Discrete(max_width * max_height)` — set at construction and unchanged across `reset()` / `regenerate_map`.
-
-Decode any observation as:
-
-```text
-row = obs // max_width
-col = obs % max_width
-```
-
-Random maps use a fixed `max_height × max_width` canvas. Tree (`T`) cells surround the lake; the agent only occupies playable tiles (`S`, `F`, `M`, `W`, `G`).
-
-With `permute_obs=True` the formula above no longer applies: observations are relabeled by a random permutation of the canvas state indices, sampled with the map and listed in `info["map"]` as `obs_permutation` (`external_obs = obs_permutation[internal_state]`). Likewise `permute_actions=True` relabels the four actions via `action_permutation`, and `info["q_star"]` is reported in external action order.
-
 ### Tile legend
 
 | Tile | Name | Behavior |
@@ -137,14 +122,19 @@ Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — 
 |-----------|---------|-------------|
 | `emit_map` | `False` | Inject map layout in `info["map"]` on every `reset()` and `step()` |
 | `emit_q_star` | `False` | Inject optimal Q-values in `info["q_star"]` (zero at terminal states) |
-| `q_star_gamma` | `0.999` | Discount used in value iteration only (env `step_penalty` is excluded), so Q\* always points toward shorter paths |
+| `q_star_gamma` | `0.999` | Discount for Q\* value iteration over `env.P` (whose rewards include `step_penalty`), so Q\* is the optimal value of the live MDP and prefers shorter paths |
 
-**Relabeling and rendering**
+**Relabeling**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `permute_obs` | `False` | Relabel observations with a random permutation of canvas state indices, sampled with the map |
 | `permute_actions` | `False` | Relabel the four actions with a random permutation, sampled with the map |
+
+**Rendering**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `fog_of_war` | `True` | Hide unvisited tiles as `?` (trees revealed when visited or bumped); set `False` to render the full map |
 | `render_mode` | `None` | Standard Gymnasium render mode: `"ansi"`, `"human"`, or `"rgb_array"` |
 

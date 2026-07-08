@@ -326,20 +326,6 @@ def build_native_tile_icons() -> dict[str, Any]:
     return {tile: _surface_from_pixels(build()) for tile, build in _PIXEL_BUILDERS.items()}
 
 
-def build_special_tile_icons(cell_size: tuple[int, int]) -> dict[str, "pygame.Surface"]:
-    """Return pygame surfaces for T/M/W tiles scaled to ``cell_size``.
-
-    Nearest-neighbor scaling preserves the pixel-art look of the sprites.
-    """
-    import pygame
-
-    size = (int(cell_size[0]), int(cell_size[1]))
-    return {
-        tile: pygame.transform.scale(icon, size)
-        for tile, icon in build_native_tile_icons().items()
-    }
-
-
 def build_sleigh_pair_badges(
     cell_size: tuple[int, int], pair_count: int
 ) -> list["pygame.Surface"]:

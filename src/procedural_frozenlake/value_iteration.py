@@ -13,7 +13,6 @@ def solve_tabular_mdp(
     n_states: int,
     n_actions: int,
     gamma: float,
-    step_penalty: float = 0.0,
     terminal_states: set[int] | None = None,
     max_iter: int = 10_000,
     tolerance: float = 1e-10,
@@ -26,7 +25,6 @@ def solve_tabular_mdp(
         n_states: Number of states.
         n_actions: Number of actions.
         gamma: Discount factor.
-        step_penalty: Added to each transition reward before the Bellman backup.
         terminal_states: States whose Q-values are pinned to zero (no further
             return is obtainable once the episode has ended there).
         max_iter: Maximum value-iteration sweeps.
@@ -49,7 +47,7 @@ def solve_tabular_mdp(
                 for prob, next_s, r, done in P[s][a]:
                     p = float(prob)
                     ns = int(next_s)
-                    rr = float(r) + step_penalty
+                    rr = float(r)
                     if done:
                         acc += p * rr
                     else:

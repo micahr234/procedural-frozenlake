@@ -17,7 +17,6 @@ from gymnasium.envs.toy_text.utils import categorical_sample
 from procedural_frozenlake.tile_icons import (
     SPECIAL_TILES,
     build_sleigh_pair_badges,
-    build_special_tile_icons,
     goal_reward_icon,
 )
 from procedural_frozenlake.utils import to_json_str
@@ -33,7 +32,6 @@ TILE_HOLE = "H"
 TILE_GOAL = "G"
 TILE_TREE = "T"
 
-TERMINAL_TILES = frozenset({TILE_GOAL, TILE_HOLE})
 PLAYABLE_TILES = frozenset(
     {TILE_START, TILE_FROZEN, TILE_GLARE, TILE_SLEIGH, TILE_GOAL, TILE_HOLE}
 )
@@ -66,13 +64,13 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     ``goal_reward_low`` / ``goal_reward_high`` sample one reward **per goal tile** when the map
     is generated. The transition matrix ``P`` carries the exact env rewards (per-goal reward
     plus ``step_penalty``), so planning directly from ``P`` matches live behavior. When
-    ``emit_q_star`` is True, :meth:`compute_q_table` solves ``P`` with the env
-    ``step_penalty`` stripped out and discount ``q_star_gamma`` (default ``0.999``), so
-    Q\\* is independent of reward shaping and always points toward shorter paths. Terminal
-    states (goal/hole) and tree states have Q-values of zero.
+    ``emit_q_star`` is True, :meth:`compute_q_table` solves ``P`` as-is — the env
+    ``step_penalty`` is part of the returns — with discount ``q_star_gamma`` (default
+    ``0.999``), so Q\\* is the optimal value of the live MDP and prefers shorter paths.
+    Terminal states (goal/hole) and tree states have Q-values of zero.
 
     When ``emit_map`` is True, every :meth:`reset` and :meth:`step` puts a JSON string in
-    ``info["map"]`` with ``board``, ``rewards``, ``canvas``, ``playable_count``, ``sleighs``,
+    ``info["map"]`` with ``board``, ``rewards``, ``canvas``, ``sleighs``,
     and — when enabled — ``obs_permutation`` / ``action_permutation``.
 
     ``permute_obs=True`` relabels observations with a random permutation of the canvas state
@@ -116,9 +114,10 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         emit_map: bool = False,
         emit_q_star: bool = False,
         q_star_gamma: float = 0.999,
-        # Observation/action relabeling and rendering
+        # Observation/action relabeling
         permute_obs: bool = False,
         permute_actions: bool = False,
+        # Rendering
         fog_of_war: bool = True,
     ):
         hole_prob = _validate_prob("hole_prob", hole_prob)
@@ -186,7 +185,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._gridmap: list[str] | None = None
         self._goal_rewards_by_state: dict[int, float] = {}
         self._map_info: str | None = None
-        self._map_dirty = False
         self._q_table: np.ndarray | None = None
         self.fog_of_war = bool(fog_of_war)
         self._visited: np.ndarray | None = None
@@ -274,9 +272,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             seen.add(partner)
             pairs.append([state, partner])
         return pairs
-
-    def _playable_tile_count(self, gridmap: list[str]) -> int:
-        return sum(ch != TILE_TREE for row in gridmap for ch in row)
 
     def _rebuild_transition_matrix(self) -> None:
         nrow, ncol = int(self.nrow), int(self.ncol)
@@ -408,7 +403,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         else:
             self._action_perm = None
         self._map_info = to_json_str(self._make_map_info_dict())
-        self._map_dirty = True
         self._q_table = None
         self._clear_fog()
 
@@ -436,7 +430,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
                 str(k): float(v) for k, v in sorted(self._goal_rewards_by_state.items())
             },
             "canvas": {"width": self._canvas_width, "height": self._canvas_height},
-            "playable_count": self._playable_tile_count(self._gridmap or []),
             "sleighs": {"pairs": self._sleigh_pairs_for_info()},
         }
         if self._obs_perm is not None:
@@ -932,41 +925,22 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             for c in range(self.ncol)
             if self._decode_grid_char(self.desc[r, c]) in absorbing_tiles
         }
-        # P rewards include the env step penalty; strip it so Q* reflects only the
-        # goal rewards, discounted by q_star_gamma to prefer shorter paths.
+        # P carries the exact env rewards (per-goal reward + step penalty), so Q*
+        # is the true optimal value of the live MDP, discounted by q_star_gamma.
         return solve_tabular_mdp(
             P=self.P,
             n_states=n_s,
             n_actions=4,
             gamma=float(self.q_star_gamma),
-            step_penalty=-float(self._step_penalty),
             terminal_states=terminal_states,
             max_iter=max_iter,
             tolerance=tolerance,
         )
 
-    def _optimal_action_for_obs(self, obs: int) -> int:
-        if self._q_table is None:
-            return 0
-        state = int(obs)
-        n_s, _ = self._q_table.shape
-        if state < 0 or state >= n_s:
-            return 0
-        return int(np.argmax(self._q_table[state]))
-
     def _q_star_for_obs(self, obs: int) -> np.ndarray:
-        action_dim = int(getattr(self.action_space, "n", 0))
         if self._q_table is None:
-            fallback = np.full((action_dim,), np.nan, dtype=np.float64)
-            fallback[self._optimal_action_for_obs(obs)] = 0.0
-            return fallback
-        state = int(obs)
-        n_s, _ = self._q_table.shape
-        if state < 0 or state >= n_s:
-            fallback = np.full((action_dim,), np.nan, dtype=np.float64)
-            fallback[self._optimal_action_for_obs(obs)] = 0.0
-            return fallback
-        return np.asarray(self._q_table[state], dtype=np.float64).copy()
+            self._q_table = self.compute_q_table()
+        return np.asarray(self._q_table[int(obs)], dtype=np.float64).copy()
 
     def _clear_fog(self) -> None:
         if not self.fog_of_war:
@@ -1104,17 +1078,14 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             return self._tile_icons
         import pygame  # type: ignore[import-untyped]
 
+        # Icons are static assets shipped with the package; regenerate them with
+        # scripts/generate_tile_icons.sh during development.
         img_dir = path.join(path.dirname(__file__), "img")
         icons: dict[str, Any] = {}
         for tile in SPECIAL_TILES:
             icon_path = path.join(img_dir, _TILE_ICON_FILES[tile])
-            if path.isfile(icon_path):
-                raw = pygame.image.load(icon_path)
-                icons[tile] = pygame.transform.scale(raw, cell_size)
-            else:
-                if not pygame.get_init():
-                    pygame.init()
-                icons[tile] = build_special_tile_icons(cell_size)[tile]
+            raw = pygame.image.load(icon_path)
+            icons[tile] = pygame.transform.scale(raw, cell_size)
         self._tile_icons = icons
         self._tile_icons_cell_size = cell_size
         return icons
@@ -1280,10 +1251,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._ensure_fog_initialized()
         self._mark_visited(obs)
         info = dict[str, Any](info)
-        if self._map_dirty:
-            if self.emit_q_star:
-                self._q_table = self.compute_q_table()
-            self._map_dirty = False
         if self.emit_map:
             info["map"] = self._map_info
         if self.emit_q_star:
