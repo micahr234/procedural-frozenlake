@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- README tile legend now shows rendered tile icons in an **Icon** column (`docs/tile_legend/`); regenerate with `scripts/generate_legend_tiles.sh`.
+
 ### Removed
 - Runtime fallback that regenerated the `T`/`M`/`W` tile sprites in-process when the packaged PNGs were missing. The icons are static assets shipped with the package; rendering now assumes they exist. Regenerate them during development with `scripts/generate_tile_icons.sh`. The unused `build_special_tile_icons` helper was removed from `tile_icons`.
 - `playable_count` field from the `info["map"]` JSON. It counted every non-tree tile (including holes) and nothing consumed it since the `min_playable_tiles`/`max_playable_tiles` rejection logic was removed.

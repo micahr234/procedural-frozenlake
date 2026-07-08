@@ -4,17 +4,21 @@
 
 A Gymnasium environment that extends Frozen Lake with **procedurally generated maps**.
 
-`Procedural-FrozenLake-v1` provides:
+`Procedural-FrozenLake-v1` optionally supports:
 
-- **Jagged lake shorelines** — every random map is a lake on a fixed canvas, bounded by impassable trees (`T`) with independently varying edges per row and column. A lake envelope sampled within `min_width..max_width` × `min_height..max_height` is placed uniformly at random; all playable tiles fit inside it, though the jagged shoreline may leave the lake smaller than the envelope.
-- **Tile-driven physics** — glare ice (`M`, mirror ice) is locally slippery; sleighs (`W`, warp) teleport between paired tiles; no global `is_slippery` flag.
-- **Flexible start and goal placement** — fixed positions, lists of positions, or probabilistic placement; multiple starts and goals supported.
-- **Per-goal rewards** — sample or specify a different reward for each goal tile.
-- **Fresh maps on reset** — pass `options={"regenerate_map": True}` to sample a new valid layout without rebuilding the env.
-- **Stable observation space** — always `Discrete(max_width * max_height)`; state index is `row * max_width + col` on the fixed canvas.
-- **Optional supervision signals** — `emit_map=True` and `emit_q_star=True` expose the layout and optimal Q-values in `info` on every `reset()` and `step()`.
-- **Fog of war rendering** — on by default: unvisited tiles render as `?`, including trees; bumping a tree reveals it; warping reveals both sleighs of the pair; exploration persists until map regeneration. Pass `fog_of_war=False` for a fully visible map.
-- **Observation and action relabeling** — `permute_obs=True` / `permute_actions=True` scramble state indices and action ids with permutations sampled alongside the map (and exposed in `info["map"]`), so agents can't rely on the canonical grid numbering.
+- **Random lake shapes** — Each map is a lake on a fixed canvas with uneven, jagged edges instead of a plain rectangle. Size is picked within your `min_width`/`max_width` and `min_height`/`max_height` bounds and placed at a random spot on the grid.
+- **Tree tiles (`T`)** — Impassable tiles that block movement. Every map gets a tree border around the lake; sprinkle more inside with `tree_prob`.
+- **Mirror ice tiles (`M`)** — Slippery ice that makes you slide like classic FrozenLake. Sprinkle them with `glare_prob` instead of flipping a global slippery switch.
+- **Warp sleigh tiles (`W`)** — Paired tiles that teleport you to each other when you step on one. Add them with `sleigh_pair_count` (two `W` tiles per pair).
+- **Multiple start tiles (`S`)** — Pin one spot, pass a list, or sample placement with `start_pos` / `start_pos_prob`.
+- **Multiple goal tiles (`G`)** — Same for goals with `goal_pos` / `goal_pos_prob`.
+- **Different rewards per goal** — Each goal tile can pay its own amount, either sampled between bounds or set explicitly.
+- **Fresh maps without rebuilding** — Pass `options={"regenerate_map": True}` on `reset()` to draw a new layout in the same env instance.
+- **Map layout in `info`** — `emit_map=True` puts the current board in `info["map"]` on every reset and step.
+- **Optimal Q-values in `info`** — `emit_q_star=True` puts the optimal Q-table in `info["q_star"]` on every reset and step.
+- **Hidden tiles until explored** — Fog of war is on by default: unvisited tiles show as `?`. Bumping a tree or warping through a sleigh reveals those tiles; what you've seen stays visible until the map changes. Turn off with `fog_of_war=False`.
+- **Shuffled state numbers** — `permute_obs=True` randomly relabels observations so agents can't memorize that state 12 always means "row 2, column 4."
+- **Shuffled action numbers** — `permute_actions=True` does the same for the four movement actions. Both permutations are stored in `info["map"]`.
 
 ## News
 
@@ -75,19 +79,21 @@ Maps are generated lazily on the first `reset()`, not during construction. **By 
 
 ### Tile legend
 
-| Tile | Name | Behavior |
-|------|------|----------|
-| `S` | Start | Walkable; deterministic movement |
-| `F` | Frozen | Normal safe ice; deterministic movement |
-| `M` | Mirror (glare) ice | Slippery ice (stochastic sliding when standing on it) |
-| `W` | Warp sleigh | Warp to paired sleigh on entry (row-major pairing) |
-| `H` | Hole | Terminal — fall through |
-| `G` | Goal | Terminal — success |
-| `T` | Tree | Impassable shoreline and optional interior patches |
+| Icon | Tile | Name | Behavior |
+|:----:|:----:|------|----------|
+| <img src="docs/tile_legend/s.png" width="40" alt="Start tile"/> | `S` | Start | Walkable; deterministic movement |
+| <img src="docs/tile_legend/f.png" width="40" alt="Frozen tile"/> | `F` | Frozen | Normal safe ice; deterministic movement |
+| <img src="docs/tile_legend/m.png" width="40" alt="Mirror ice tile"/> | `M` | Mirror ice | Slippery ice (stochastic sliding when standing on it) |
+| <img src="docs/tile_legend/w.png" width="40" alt="Warp sleigh tile"/> | `W` | Warp sleigh | Warp to paired sleigh on entry (row-major pairing) |
+| <img src="docs/tile_legend/h.png" width="40" alt="Hole tile"/> | `H` | Hole | Terminal — fall through |
+| <img src="docs/tile_legend/g.png" width="40" alt="Goal tile"/> | `G` | Goal | Terminal — success |
+| <img src="docs/tile_legend/t.png" width="40" alt="Tree tile"/> | `T` | Tree | Impassable shoreline and optional interior patches |
 
-In `human` / `rgb_array` rendering, `T` / `M` / `W` appear as pixel-art sprites drawn in the original FrozenLake style (snowy pine tree, almost-white polished ice patch with a star gleam, red sleigh with a reindeer) over the standard ice tile. Each sleigh also carries a small numbered color-coded badge in its bottom-left corner; linked sleighs share the same badge. Goal presents show their reward in a badge, and the bow is tinted from yellow (low reward) to green (high reward) relative to the map's reward range. ANSI mode colorizes tiles the same with fog on or off: trees white, glare ice cyan, sleighs and holes blue, goals green, starts yellow.
+Icons above match `human` / `rgb_array` rendering (ice base tile plus overlay). Sleigh pairs show a numbered badge; goal presents show their reward in a badge with a bow tinted from yellow (low) to green (high). ANSI mode colorizes letters the same with fog on or off: trees white, mirror ice cyan, sleighs and holes blue, goals green, starts yellow.
 
-Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — the dangerous patches on a frozen lake. `glare_prob=1.0` gives a map similar to the classic slippery Gymnasium FrozenLake (start tiles stay deterministic; only plain frozen tiles become glare).
+Mirror ice is slippery because of a thin meltwater film on mirror-smooth ice — the dangerous patches on a frozen lake. `glare_prob=1.0` gives a map similar to the classic slippery Gymnasium FrozenLake (start tiles stay deterministic; only plain frozen tiles become mirror ice).
+
+Regenerate the legend previews after changing tile art: `bash scripts/generate_legend_tiles.sh`.
 
 ### Constructor parameters
 
@@ -101,7 +107,7 @@ Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — 
 | `min_height`, `max_height` | `3`, `8` | Height bounds for the sampled lake envelope; all playable tiles fit inside it (canvas height = `max_height`) |
 | `hole_prob` | `0.2` | Probability a tile becomes a hole `H` |
 | `tree_prob` | `0.0` | Probability a frozen ice tile becomes an interior tree `T` after the lake is carved |
-| `glare_prob` | `0.0` | Probability a frozen (`F`) tile becomes glare ice `M` |
+| `glare_prob` | `0.0` | Probability a frozen (`F`) tile becomes mirror ice `M` |
 | `sleigh_pair_count` | `0` | Number of sleigh warp pairs (`2 × count` `W` tiles) |
 | `start_pos`, `start_pos_prob` | `None`, `None` | Fixed start tile(s) or probability of placing starts; explicit positions raise an error when they can't be placed on lake ice |
 | `goal_pos`, `goal_pos_prob` | `None`, `None` | Fixed goal tile(s) or probability of placing goals; explicit positions raise an error when they can't be placed on lake ice |
@@ -112,7 +118,7 @@ Glare ice is slippery because of a thin meltwater film on mirror-smooth ice — 
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `slippery_success_rate` | `1/3` | Intended-direction success rate on glare ice `M` |
+| `slippery_success_rate` | `1/3` | Intended-direction success rate on mirror ice `M` |
 | `step_penalty` | `0.0` | Added to every step reward (e.g. `-0.01`); baked into `env.P` transition rewards |
 | `goal_reward_low`, `goal_reward_high` | `1.0`, `1.0` | Per-goal reward sampling bounds |
 
