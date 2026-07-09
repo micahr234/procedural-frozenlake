@@ -5,20 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- `Procedural-FrozenLake-v1` is now registered with `max_episode_steps=200` (matching `FrozenLake8x8-v1`), so `gym.make` wraps it in a `TimeLimit` that truncates episodes at 200 steps. Override with `gym.make(..., max_episode_steps=…)`.
+
 ## [1.0.0] - 2026-07-08
 
 ### Added
 - `shoreline_jaggedness` constructor parameter (default `1`): controls how many tiles the shoreline can shift per edge. Positive shifts carve bays inward; negative shifts push ice peninsulas into the tree border band. `0` yields a smooth rectangular lake inset.
-- `width`, `height`, `min_border`, and `max_border` constructor parameters replace the old lake envelope width/height bounds. Each random map samples a tree border thickness on every side; the sampled value is exposed in `info["map"]` as `"border"`.
+- `width`, `height`, `min_border`, and `max_border` constructor parameters replace the old lake envelope width/height bounds. Each random map samples a tree border thickness on every side (generation only; not stored in `info["map"]`).
 - Clearer docs for canonical flat canvas indexing (`index = row * width + col`, top-to-bottom, left-to-right) used by `start_pos` / `goal_pos` and `info["map"]["rewards"]`.
-- Gymnasium registration sets `nondeterministic=True` and `max_episode_steps=100`.
 - CI workflow runs pytest and pyright on pushes and pull requests to `main`.
 - Map generation lives in `procedural_frozenlake.mapgen`; tile constants in `procedural_frozenlake.tiles`.
 
 ### Changed
 - Stable 1.0.0 API; package classifier is Production/Stable.
 - Random map generation no longer places a variable-size lake envelope at a random canvas offset. Border thickness is controlled directly via `min_border`/`max_border`.
-- `info["map"]` is a Python `dict` (not a JSON string). Goal `rewards` keys are `int` canonical state indices.
+- `info["map"]` is a blueprint dict (`board`, `rewards`, `sleighs`, optional permutations) that can be passed back as `fixed_map` to rebuild the same layout. Goal `rewards` keys are `int` canonical state indices.
 - Renamed `glare_prob` to `mirror_prob` to match mirror ice (`M`) terminology.
 - `goal_reward_low > goal_reward_high` raises `ValueError` instead of silently swapping.
 - `reset(options=…)` only accepts `regenerate_map`; unknown keys raise `ValueError`.
@@ -30,6 +32,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - `step_penalty` / `step_reward` constructor parameter — non-goal transitions now always pay `0`; goals pay their per-goal reward only.
+- `canvas` and `border` fields from `info["map"]` (size is implied by `board`; border is generation-only).
 - `min_width`, `max_width`, `min_height`, and `max_height` constructor parameters (superseded by `width`/`height` canvas size plus `min_border`/`max_border`).
 - `info["prob"]` from `reset()` and `step()` — legacy Gymnasium FrozenLake metadata for the sampled transition probability.
 - Runtime fallback that regenerated the `T`/`M`/`W` tile sprites in-process when the packaged PNGs were missing.

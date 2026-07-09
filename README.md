@@ -6,22 +6,21 @@ A Gymnasium environment that extends Frozen Lake with **procedurally generated m
 
 `Procedural-FrozenLake-v1` optionally supports:
 
-- **Random lake shapes** — Each map is a lake on a fixed canvas with uneven, jagged edges instead of a plain rectangle. Tree border thickness is sampled from your `min_border`/`max_border` bounds on every side; shoreline bays and peninsulas are controlled by `shoreline_jaggedness`.
-- **Tree tiles (`T`)** — Impassable tiles that block movement. Every map gets a tree border around the lake; sprinkle more inside with `tree_prob`.
-- **Mirror ice tiles (`M`)** — Slippery ice that makes you slide like classic FrozenLake. Sprinkle them with `mirror_prob` instead of flipping a global slippery switch.
-- **Warp sleigh tiles (`W`)** — Paired tiles that teleport you to each other when you step on one. Add them with `sleigh_pair_count` (two `W` tiles per pair). Pairs are linked in **row-major scan order**.
-- **Multiple start tiles (`S`)** — Pin one spot, pass a list, or sample placement with `start_pos` / `start_pos_prob`. Positions are canonical flat canvas indices (`row * width + col`, top-to-bottom, left-to-right).
-- **Multiple goal tiles (`G`)** — Same for goals with `goal_pos` / `goal_pos_prob`.
-- **Different rewards per goal** — Each goal tile can pay its own amount, either sampled between bounds or set explicitly. Non-goal transitions pay `0`.
-- **Fresh maps without rebuilding** — Pass `options={"regenerate_map": True}` on `reset()` to draw a new layout in the same env instance.
-- **Map layout in `info`** — `emit_map=True` puts a Python `dict` in `info["map"]` on every reset and step.
-- **Optimal Q-values in `info`** — `emit_q_star=True` puts a length-4 vector in `info["q_star"]` (Q\* for the **current** state, in external action order). Use `env.unwrapped.compute_q_table()` for the full table.
-- **Hidden tiles until explored** — Fog of war is on by default: unvisited tiles show as `?` in **render** modes only. The observation is still the full state index. Turn off with `fog_of_war=False`.
-- **Shuffled state / action numbers** — `permute_obs` / `permute_actions` relabel agent-facing IDs. The board in `info["map"]` and position kwargs stay in **canonical** grid coordinates.
+- **Random lake shapes** — jagged shorelines and variable tree borders on a fixed canvas
+- **Tree tiles (`T`)** — impassable obstacles around the lake, with optional patches inside
+- **Mirror ice tiles (`M`)** — sprinkle slippery tiles where you want them, instead of a global slippery switch
+- **Warp sleigh tiles (`W`)** — paired tiles that teleport you between them
+- **Multiple starts and goals** — pin exact tiles or place them randomly, with a different reward per goal
+- **Fresh maps without rebuilding** — regenerate the layout from `reset()` in the same env instance
+- **Supervision signals in `info`** — the map blueprint (`emit_map`) and optimal Q-values for the current state (`emit_q_star`)
+- **Fog of war** — unvisited tiles render as `?` until explored (on by default; render-only)
+- **Shuffled state / action IDs** — relabel agent-facing observation and action numbers with `permute_obs` / `permute_actions`
+
+Every knob is detailed under [Constructor parameters](#constructor-parameters).
 
 ## News
 
-- **2026-07-08 — v1.0.0 is out!** — Stable API: border-based lake generation (`width`/`height`/`min_border`/`max_border`/`shoreline_jaggedness`), `info["map"]` as a dict, `mirror_prob`, Gymnasium `max_episode_steps=100`, and clearer docs. See [CHANGELOG.md](CHANGELOG.md).
+- **2026-07-08 — v1.0.0 is out!** — Stable API: border-based lake generation (`width`/`height`/`min_border`/`max_border`/`shoreline_jaggedness`), `info["map"]` as a dict, `mirror_prob`, and clearer docs. See [CHANGELOG.md](CHANGELOG.md).
 - **2026-07-07 — v0.4.0** — Observation and action permutations, tile letter rename (`T`/`M`/`W`), fog of war on by default, exact rewards in `env.P`. See [CHANGELOG.md](CHANGELOG.md).
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
@@ -81,18 +80,10 @@ See [`examples/rollout.ipynb`](examples/rollout.ipynb) for a tutorial notebook: 
 
 **ID:** `Procedural-FrozenLake-v1`
 
-Maps are generated lazily on the first `reset()`, not during construction. **By default, the same map is reused across episodes** — only pass `options={"regenerate_map": True}` when you want a fresh layout.
+This env follows the conventions of Gymnasium's [FrozenLake](https://gymnasium.farama.org/environments/toy_text/frozen_lake/): the same four actions, flat state indices (`row * width + col`), and reward on reaching a goal. What differs:
 
-**Two RNG streams:**
-
-| Seed | Controls |
-|------|----------|
-| `map_seed` | Layout, goal rewards, permutations, border sampling |
-| `reset(seed=…)` | Episode randomness (which start tile, mirror-ice slips) |
-
-`reset(seed=…)` does **not** regenerate the map unless you also pass `regenerate_map=True`.
-
-Registered with `max_episode_steps=100` and `nondeterministic=True`, so `truncated` can become `True` under the Gymnasium `TimeLimit` wrapper. Actions are `0=Left, 1=Down, 2=Right, 3=Up` unless `permute_actions=True`.
+- **One map per env by default.** The map is generated lazily on the first `reset()` and reused across episodes. Pass `options={"regenerate_map": True}` to `reset()` when you want a fresh layout.
+- **Two independent random streams.** `map_seed` fixes the *map* — lake shape, tile placement, goal rewards, and any permutations. `reset(seed=…)` only affects *episode* randomness — which start tile you begin on, which way you slip on mirror ice. A reset seed never draws a new map.
 
 ### Tile legend
 
@@ -113,8 +104,8 @@ Registered with `max_episode_steps=100` and `nondeterministic=True`, so `truncat
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `map_seed` | `None` | Seed for map generation (independent of reset seed) |
-| `fixed_map` | `None` | Fixed layout (list of row strings or dict with `board`/`rewards`); disables random generation and cannot be combined with `start_pos`/`goal_pos` options |
-| `width`, `height` | `8`, `8` | Fixed canvas dimensions; state indices are `0 .. width*height-1`, numbered top-to-bottom, left-to-right (`index = row * width + col`) |
+| `fixed_map` | `None` | Fixed layout: list of row strings, or a blueprint dict (`board` / `rewards` / `sleighs` / permutations — same shape as `info["map"]`). Disables random generation and cannot be combined with `start_pos`/`goal_pos` options |
+| `width`, `height` | `8`, `8` | Fixed canvas dimensions; state indices run `0 .. width*height-1` |
 | `min_border`, `max_border` | `1`, `2` | Tree margin sampled uniformly on every side; playable lake ice fills the interior inset |
 | `shoreline_jaggedness` | `1` | Max tiles of shoreline variation per edge (`0` = smooth rectangle; higher = deeper bays and longer peninsulas into the border band) |
 | `hole_prob` | `0.2` | Probability a tile becomes a hole `H` |
@@ -145,8 +136,13 @@ Registered with `max_episode_steps=100` and `nondeterministic=True`, so `truncat
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `permute_obs` | `False` | Relabel observations with a random permutation of canvas state indices, sampled with the map. The board in `info["map"]` stays canonical. |
-| `permute_actions` | `False` | Relabel the four actions with a random permutation, sampled with the map |
+| `permute_obs` | `False` | Relabel observations with a random permutation of canvas state indices |
+| `permute_actions` | `False` | Relabel the four actions with a random permutation |
+
+Both permutations are sampled with the map (from `map_seed`) and resampled when the map regenerates. Only agent-facing IDs change — the board in `info["map"]` and the position kwargs stay in canonical grid coordinates.
+
+- **`permute_obs`** — the agent no longer sees the canonical flat index. If the agent stands at canonical index `5` and `info["map"]["obs_permutation"][5]` is `17`, then `reset`/`step` return observation `17`. Decode with the permutation, or keep using the canonical board in `info["map"]`.
+- **`permute_actions`** — the four movement IDs are shuffled the same way. If `action_permutation` is `[2, 0, 3, 1]`, external action `0` means Right, `1` means Left, and so on. `info["q_star"]` is already ordered by these external action IDs.
 
 **Rendering**
 
@@ -157,17 +153,22 @@ Registered with `max_episode_steps=100` and `nondeterministic=True`, so `truncat
 
 ### `info["map"]` schema
 
-When `emit_map=True`, `info["map"]` is a `dict` with:
+When `emit_map=True`, `info["map"]` is a blueprint `dict` you can pass back as `fixed_map` to rebuild the same layout:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `board` | `list[str]` | Row strings of tile letters |
+| `board` | `list[str]` | Row strings of tile letters (size is implied by the board) |
 | `rewards` | `dict[int, float]` | Goal reward by **canonical** flat state index |
-| `canvas` | `dict` | `{"width": int, "height": int}` |
-| `sleighs` | `dict` | `{"pairs": [[a, b], …]}` canonical state indices |
-| `border` | `int` | Sampled tree border (random maps only) |
-| `obs_permutation` | `list[int]` | Present when `permute_obs=True` |
-| `action_permutation` | `list[int]` | Present when `permute_actions=True` |
+| `sleighs` | `dict` | `{"pairs": [[a, b], …]}` canonical state indices (row-major pairing) |
+| `obs_permutation` | `list[int]` | Present when observations were relabeled |
+| `action_permutation` | `list[int]` | Present when actions were relabeled |
+
+Example:
+
+```python
+obs, info = env.reset()
+clone = gym.make("Procedural-FrozenLake-v1", fixed_map=info["map"])
+```
 
 ### Reset options
 

@@ -94,9 +94,10 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     state (ordered by external action id when ``permute_actions`` is on).
 
     When ``emit_map`` is True, every :meth:`reset` and :meth:`step` puts a **dict** in
-    ``info["map"]`` with ``board``, ``rewards`` (int keys → float), ``canvas``,
-    ``sleighs``, optional ``border``, and — when enabled — ``obs_permutation`` /
-    ``action_permutation``.
+    ``info["map"]`` that is a blueprint for the current layout: ``board``, ``rewards``
+    (int keys → float), ``sleighs``, and — when enabled — ``obs_permutation`` /
+    ``action_permutation``. Pass that dict back as ``fixed_map`` to rebuild the same
+    map (including permutations).
 
     Positions (``start_pos`` / ``goal_pos``) and map reward keys use **canonical flat
     canvas indices**: numbered top-to-bottom, left-to-right as
@@ -116,9 +117,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     Warping through a sleigh reveals both sleighs of the pair. Bumping into a blocked
     tile reveals it. Pass ``fog_of_war=False`` to render the full map.
 
-    Episodes may truncate via Gymnasium's ``TimeLimit`` wrapper
-    (``max_episode_steps=100`` on :func:`ensure_registered`); this env itself always
-    returns ``truncated=False`` from :meth:`step`.
+    The raw env never truncates. The ``Procedural-FrozenLake-v1`` registration wraps
+    it in a 200-step ``TimeLimit`` (matching ``FrozenLake8x8-v1``); override with
+    ``gym.make(..., max_episode_steps=…)``.
     """
 
     def __init__(
@@ -215,7 +216,6 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._slippery_success_rate = float(slippery_success_rate)
         self._canvas_height = int(height)
         self._canvas_width = int(width)
-        self._sampled_border: int | None = None
         self._sleigh_partner_by_state: dict[int, int] = {}
         start_positions = self._normalize_positions(start_pos, "start_pos")
         goal_positions = self._normalize_positions(goal_pos, "goal_pos")
@@ -255,13 +255,17 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._obs_perm: list[int] | None = None
         self._action_perm: list[int] | None = None
         self.action_space = gym.spaces.Discrete(4)
-        fixed_rewards: Mapping[int | str, float] | None = None
         if fixed_map is not None:
-            gridmap, fixed_rewards = self._parse_fixed_map_spec(fixed_map)
-            self._canvas_height = len(gridmap)
-            self._canvas_width = len(gridmap[0])
+            parsed = self._parse_fixed_map_spec(fixed_map)
+            self._canvas_height = len(parsed["board"])
+            self._canvas_width = len(parsed["board"][0])
             self._observation_space_n = self._canvas_height * self._canvas_width
-            self._initialize_frozenlake_map(gridmap=gridmap, reward_overrides=fixed_rewards)
+            self._initialize_frozenlake_map(
+                gridmap=parsed["board"],
+                reward_overrides=parsed["rewards"],
+                obs_permutation=parsed["obs_permutation"],
+                action_permutation=parsed["action_permutation"],
+            )
         else:
             self._observation_space_n = self._canvas_height * self._canvas_width
             self.observation_space = gym.spaces.Discrete(self._observation_space_n)
@@ -410,6 +414,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         *,
         gridmap: list[str],
         reward_overrides: Mapping[int | str, float] | None,
+        obs_permutation: list[int] | None = None,
+        action_permutation: list[int] | None = None,
     ) -> None:
         self._gridmap = gridmap
         self._canvas_height = len(gridmap)
@@ -436,13 +442,21 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._rebuild_transition_matrix()
         self._set_observation_space()
         n_states = self._canvas_height * self._canvas_width
-        if self.permute_obs:
+        if obs_permutation is not None:
+            self._obs_perm = self._validate_permutation(
+                obs_permutation, n_states, "obs_permutation"
+            )
+        elif self.permute_obs:
             obs_perm = list(range(n_states))
             self._map_rng.shuffle(obs_perm)
             self._obs_perm = obs_perm
         else:
             self._obs_perm = None
-        if self.permute_actions:
+        if action_permutation is not None:
+            self._action_perm = self._validate_permutation(
+                action_permutation, 4, "action_permutation"
+            )
+        elif self.permute_actions:
             action_perm = list(range(4))
             self._map_rng.shuffle(action_perm)
             self._action_perm = action_perm
@@ -452,12 +466,22 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._q_table = None
         self._clear_fog()
 
+    @staticmethod
+    def _validate_permutation(
+        perm: list[int], size: int, name: str
+    ) -> list[int]:
+        values = [int(x) for x in perm]
+        if sorted(values) != list(range(size)):
+            raise ValueError(
+                f"{name} must be a permutation of 0..{size - 1}; got {perm!r}."
+            )
+        return values
+
     def _regenerate_map(self) -> None:
-        gridmap, border = generate_valid_map(
+        gridmap, _border = generate_valid_map(
             self._map_rng,
             **self._generation_config,
         )
-        self._sampled_border = border
         self._initialize_frozenlake_map(gridmap=gridmap, reward_overrides=None)
 
     def _ensure_map_initialized(self) -> None:
@@ -471,16 +495,14 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             )
 
     def _make_map_info_dict(self) -> dict[str, Any]:
+        """Blueprint dict: enough to rebuild this layout via ``fixed_map=...``."""
         info: dict[str, Any] = {
             "board": list(self._gridmap or []),
             "rewards": {
                 k: float(v) for k, v in sorted(self._goal_rewards_by_state.items())
             },
-            "canvas": {"width": self._canvas_width, "height": self._canvas_height},
             "sleighs": {"pairs": self._sleigh_pairs_for_info()},
         }
-        if self._sampled_border is not None:
-            info["border"] = int(self._sampled_border)
         if self._obs_perm is not None:
             info["obs_permutation"] = list(self._obs_perm)
         if self._action_perm is not None:
@@ -497,26 +519,84 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     def _parse_fixed_map_spec(
         cls,
         fixed_map: list[str] | tuple[str, ...] | Mapping[str, Any],
-    ) -> tuple[list[str], Mapping[int | str, float] | None]:
-        if isinstance(fixed_map, Mapping):
-            if "board" not in fixed_map:
+    ) -> dict[str, Any]:
+        """Parse ``fixed_map`` into board, rewards, and optional permutations.
+
+        A dict from ``info["map"]`` is accepted as-is (blueprint round-trip).
+        """
+        if not isinstance(fixed_map, Mapping):
+            return {
+                "board": normalize_and_validate_fixed_map(fixed_map=fixed_map),
+                "rewards": None,
+                "obs_permutation": None,
+                "action_permutation": None,
+            }
+        if "board" not in fixed_map:
+            raise ValueError(
+                "fixed_map dict must include 'board' (list of row strings), "
+                "and optionally 'rewards', 'sleighs', 'obs_permutation', "
+                "and 'action_permutation'."
+            )
+        board_raw = fixed_map["board"]
+        if not isinstance(board_raw, (list, tuple)):
+            raise ValueError("fixed_map['board'] must be a list or tuple of row strings.")
+        gridmap = normalize_and_validate_fixed_map(fixed_map=board_raw)
+        width = len(gridmap[0])
+        partners = build_sleigh_partners(gridmap, width)
+
+        rewards_raw = fixed_map.get("rewards")
+        if rewards_raw is not None and not isinstance(rewards_raw, Mapping):
+            raise ValueError(
+                "fixed_map['rewards'] must be a mapping from goal state index to reward."
+            )
+
+        sleighs_raw = fixed_map.get("sleighs")
+        if sleighs_raw is not None:
+            if not isinstance(sleighs_raw, Mapping) or "pairs" not in sleighs_raw:
                 raise ValueError(
-                    "fixed_map dict must include 'board' (list of row strings), "
-                    "and optionally 'rewards' (goal state index → reward)."
+                    "fixed_map['sleighs'] must be a dict with a 'pairs' list."
                 )
-            board_raw = fixed_map["board"]
-            if not isinstance(board_raw, (list, tuple)):
-                raise ValueError("fixed_map['board'] must be a list or tuple of row strings.")
-            gridmap = normalize_and_validate_fixed_map(fixed_map=board_raw)
-            rewards_raw = fixed_map.get("rewards")
-            if rewards_raw is None:
-                return gridmap, None
-            if not isinstance(rewards_raw, Mapping):
+            pairs_raw = sleighs_raw["pairs"]
+            if not isinstance(pairs_raw, (list, tuple)):
+                raise ValueError("fixed_map['sleighs']['pairs'] must be a list of pairs.")
+            expected = {
+                frozenset((state, partner))
+                for state, partner in partners.items()
+                if state < partner
+            }
+            got: set[frozenset[int]] = set()
+            for pair in pairs_raw:
+                if (
+                    not isinstance(pair, (list, tuple))
+                    or len(pair) != 2
+                    or not all(isinstance(x, (int, np.integer)) for x in pair)
+                ):
+                    raise ValueError(
+                        f"fixed_map['sleighs']['pairs'] entries must be [a, b] "
+                        f"state indices; got {pair!r}."
+                    )
+                got.add(frozenset((int(pair[0]), int(pair[1]))))
+            if got != expected:
                 raise ValueError(
-                    "fixed_map['rewards'] must be a mapping from goal state index to reward."
+                    "fixed_map['sleighs']['pairs'] must match the W tiles on the board "
+                    "(row-major pairing). "
+                    f"Expected {sorted(sorted(p) for p in expected)}, "
+                    f"got {sorted(sorted(p) for p in got)}."
                 )
-            return gridmap, rewards_raw
-        return normalize_and_validate_fixed_map(fixed_map=fixed_map), None
+
+        obs_perm = fixed_map.get("obs_permutation")
+        if obs_perm is not None and not isinstance(obs_perm, (list, tuple)):
+            raise ValueError("fixed_map['obs_permutation'] must be a list of ints.")
+        action_perm = fixed_map.get("action_permutation")
+        if action_perm is not None and not isinstance(action_perm, (list, tuple)):
+            raise ValueError("fixed_map['action_permutation'] must be a list of ints.")
+
+        return {
+            "board": gridmap,
+            "rewards": rewards_raw,
+            "obs_permutation": list(obs_perm) if obs_perm is not None else None,
+            "action_permutation": list(action_perm) if action_perm is not None else None,
+        }
 
     def _compute_goal_rewards_for_map(
         self,
@@ -553,7 +633,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             for c in range(self.ncol)
             if self._decode_grid_char(self.desc[r, c]) in absorbing_tiles
         }
-        # P carries the exact env rewards (per-goal reward + step penalty), so Q*
+        # P carries the exact env rewards (per-goal reward, else 0), so Q*
         # is the true optimal value of the live MDP, discounted by q_star_gamma.
         return solve_tabular_mdp(
             P=self.P,
@@ -908,14 +988,13 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
                     old_row, old_col, move_dir
                 )
                 self._mark_visited_at(target_row, target_col)
-        # P carries the exact env rewards (per-goal reward + step penalty baked in).
+        # P carries the exact env rewards (per-goal reward, else 0).
         reward = float(reward)
         info: dict[str, Any] = {}
         if self.emit_map:
             info["map"] = self._map_info
         if self.emit_q_star:
             info["q_star"] = self._emit_q_star_vector(obs)
-        # truncated is always False here; TimeLimit (max_episode_steps=100) may wrap.
         return self._external_obs(obs), reward, bool(terminated), False, info
 
     def close(self) -> None:
@@ -929,6 +1008,5 @@ def ensure_registered() -> None:
     register(
         id=PROCEDURAL_FROZENLAKE_ENV_ID,
         entry_point="procedural_frozenlake.env:ProceduralFrozenLakeEnv",
-        nondeterministic=True,
-        max_episode_steps=100,
+        max_episode_steps=200,
     )

@@ -823,8 +823,17 @@ def test_playable_tiles_respect_sampled_border() -> None:
             _, info = env.reset(seed=0)
             payload = info["map"]
             assert isinstance(payload, dict)
-            border = payload["border"]
+            assert "border" not in payload
+            assert "canvas" not in payload
             board = payload["board"]
+            # With shoreline_jaggedness=0, playable ice is inset by the sampled
+            # border; recover it from the board (outer tree frame thickness).
+            border = 0
+            while border < len(board) // 2 and all(
+                ch == "T" for ch in board[border]
+            ) and all(row[border] == "T" for row in board):
+                border += 1
+            assert border >= 1
             for r, row in enumerate(board):
                 for c, ch in enumerate(row):
                     if ch == "T":
@@ -1051,11 +1060,53 @@ def test_map_info_has_no_permutations_when_disabled() -> None:
         _, info = env.reset(seed=0)
         map_info = info["map"]
         assert isinstance(map_info, dict)
+        assert set(map_info) >= {"board", "rewards", "sleighs"}
         assert "obs_permutation" not in map_info
         assert "action_permutation" not in map_info
+        assert "border" not in map_info
+        assert "canvas" not in map_info
         assert all(isinstance(k, int) for k in map_info["rewards"])
     finally:
         env.close()
+
+
+def test_fixed_map_round_trips_info_map_blueprint() -> None:
+    """info['map'] is enough to rebuild the same layout via fixed_map."""
+    src = ProceduralFrozenLakeEnv(
+        map_seed=7,
+        emit_map=True,
+        emit_q_star=True,
+        permute_obs=True,
+        permute_actions=True,
+        sleigh_pair_count=1,
+        hole_prob=0.0,
+        min_hops=1,
+        goal_reward_low=0.5,
+        goal_reward_high=1.5,
+    )
+    try:
+        src_obs, src_info = src.reset(seed=3)
+        blueprint = src_info["map"]
+        clone = ProceduralFrozenLakeEnv(
+            fixed_map=blueprint,
+            emit_map=True,
+            emit_q_star=True,
+        )
+        try:
+            clone_obs, clone_info = clone.reset(seed=3)
+            assert clone_info["map"] == blueprint
+            assert clone_obs == src_obs
+            assert np.allclose(clone_info["q_star"], src_info["q_star"])
+            for action in range(4):
+                src.reset(seed=3)
+                clone.reset(seed=3)
+                s_obs, s_rew, s_term, _, _ = src.step(action)
+                c_obs, c_rew, c_term, _, _ = clone.step(action)
+                assert (c_obs, c_rew, c_term) == (s_obs, s_rew, s_term)
+        finally:
+            clone.close()
+    finally:
+        src.close()
 
 
 def test_flat_index_start_and_goal_pos() -> None:
@@ -1114,11 +1165,10 @@ def test_zero_start_pos_prob_fails_clearly() -> None:
         env.close()
 
 
-def test_gym_make_registers_time_limit() -> None:
+def test_gym_make_has_frozenlake_time_limit() -> None:
     env = gym.make(PROCEDURAL_FROZENLAKE_ENV_ID, map_seed=0)
     try:
         assert env.spec is not None
-        assert env.spec.max_episode_steps == 100
-        assert env.spec.nondeterministic is True
+        assert env.spec.max_episode_steps == 200
     finally:
         env.close()
