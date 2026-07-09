@@ -1,0 +1,14 @@
+"""Tile character constants for Procedural Frozen Lake maps."""
+
+TILE_START = "S"
+TILE_FROZEN = "F"
+TILE_MIRROR = "M"  # Mirror ice (was TILE_GLARE)
+TILE_SLEIGH = "W"
+TILE_HOLE = "H"
+TILE_GOAL = "G"
+TILE_TREE = "T"
+
+PLAYABLE_TILES = frozenset(
+    {TILE_START, TILE_FROZEN, TILE_MIRROR, TILE_SLEIGH, TILE_GOAL, TILE_HOLE}
+)
+ALLOWED_TILES = PLAYABLE_TILES | {TILE_TREE}

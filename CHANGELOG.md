@@ -5,12 +5,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-08
+
+### Added
+- `shoreline_jaggedness` constructor parameter (default `1`): controls how many tiles the shoreline can shift per edge. Positive shifts carve bays inward; negative shifts push ice peninsulas into the tree border band. `0` yields a smooth rectangular lake inset.
+- `width`, `height`, `min_border`, and `max_border` constructor parameters replace the old lake envelope width/height bounds. Each random map samples a tree border thickness on every side; the sampled value is exposed in `info["map"]` as `"border"`.
+- Clearer docs for canonical flat canvas indexing (`index = row * width + col`, top-to-bottom, left-to-right) used by `start_pos` / `goal_pos` and `info["map"]["rewards"]`.
+- Gymnasium registration sets `nondeterministic=True` and `max_episode_steps=100`.
+- CI workflow runs pytest and pyright on pushes and pull requests to `main`.
+- Map generation lives in `procedural_frozenlake.mapgen`; tile constants in `procedural_frozenlake.tiles`.
+
 ### Changed
-- README tile legend uses rendered tile icons from `src/procedural_frozenlake/img/` (same files the env loads for tree and mirror ice). Regenerate with `scripts/generate_tile_icons.sh`.
+- Stable 1.0.0 API; package classifier is Production/Stable.
+- Random map generation no longer places a variable-size lake envelope at a random canvas offset. Border thickness is controlled directly via `min_border`/`max_border`.
+- `info["map"]` is a Python `dict` (not a JSON string). Goal `rewards` keys are `int` canonical state indices.
+- Renamed `glare_prob` to `mirror_prob` to match mirror ice (`M`) terminology.
+- `goal_reward_low > goal_reward_high` raises `ValueError` instead of silently swapping.
+- `reset(options=…)` only accepts `regenerate_map`; unknown keys raise `ValueError`.
+- Zero starts/goals from `start_pos_prob` / `goal_pos_prob` surface a clear error instead of a generic generation failure.
+- README tile legend uses rendered tile icons from `src/procedural_frozenlake/img/`. Regenerate with `scripts/generate_icons.sh`.
+- Example notebook path is `examples/rollout.ipynb`.
+- `tile_icons.TILE_GLARE` renamed to `TILE_MIRROR` (value still `"M"`); pixel-art builders and `build_native_tile_icons` moved to `scripts/tile_icon_pixels.py`. Runtime `tile_icons` keeps only badge/goal compositing.
+- Honest `reward_range` based on goal reward bounds (non-goal transitions pay `0`).
 
 ### Removed
-- Runtime fallback that regenerated the `T`/`M`/`W` tile sprites in-process when the packaged PNGs were missing. The icons are static assets shipped with the package; rendering now assumes they exist. Regenerate them during development with `scripts/generate_tile_icons.sh`. The unused `build_special_tile_icons` helper was removed from `tile_icons`.
-- `playable_count` field from the `info["map"]` JSON. It counted every non-tree tile (including holes) and nothing consumed it since the `min_playable_tiles`/`max_playable_tiles` rejection logic was removed.
+- `step_penalty` / `step_reward` constructor parameter — non-goal transitions now always pay `0`; goals pay their per-goal reward only.
+- `min_width`, `max_width`, `min_height`, and `max_height` constructor parameters (superseded by `width`/`height` canvas size plus `min_border`/`max_border`).
+- `info["prob"]` from `reset()` and `step()` — legacy Gymnasium FrozenLake metadata for the sampled transition probability.
+- Runtime fallback that regenerated the `T`/`M`/`W` tile sprites in-process when the packaged PNGs were missing.
+- `playable_count` field from `info["map"]`.
+- `build_native_tile_icons` and the T/M/W pixel builders from the runtime `tile_icons` module (now in `scripts/tile_icon_pixels.py`).
+- `procedural_frozenlake.utils` (`to_json_str`) — no longer needed now that `info["map"]` is a dict.
 
 ## [0.4.0] - 2026-07-07
 
@@ -70,10 +95,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `fog_of_war` constructor flag: unvisited tiles render as `?` in `ansi`, `human`, and `rgb_array` modes; revealed tiles stay visible across episode `reset()` calls and clear only when the map regenerates.
 
 ### Changed
-- Example notebook (`examples/random_rollout.ipynb`): tutorial layout, 20-episode random → Q\* policy ramp, embedded HTML5 replay (no on-disk GIF).
+- Example notebook (`examples/rollout.ipynb`): tutorial layout, 20-episode random → Q\* policy ramp, embedded HTML5 replay (no on-disk GIF).
 
 ## [0.1.0] - 2026-07-07
 
 ### Added
 - Initial release: `Procedural-FrozenLake-v1` Gymnasium environment with procedural map generation, variable rectangular grids, flexible start/goal placement, per-goal rewards, optional `info["map"]` and `info["q_star"]`, and configurable step penalties.
-- Example notebook: `examples/random_rollout.ipynb`.
+- Example notebook: `examples/rollout.ipynb`.

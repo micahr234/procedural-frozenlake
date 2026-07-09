@@ -1,6 +1,6 @@
 #!/bin/bash
 # Regenerate tile images under src/procedural_frozenlake/img/.
-# Run from the repo root: bash scripts/generate_tile_icons.sh
+# Run from the repo root: bash scripts/generate_icons.sh
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,15 +21,18 @@ import sys
 
 root = sys.argv[1]
 sys.path.insert(0, os.path.join(root, "src"))
+sys.path.insert(0, os.path.join(root, "scripts"))
 
 import pygame
 from gymnasium.envs.toy_text import frozen_lake
 
-from procedural_frozenlake.tile_icons import (
-    TILE_GLARE,
+from tile_icon_pixels import (
+    TILE_MIRROR,
     TILE_SLEIGH,
     TILE_TREE,
     build_native_tile_icons,
+)
+from procedural_frozenlake.tile_icons import (
     build_sleigh_pair_badges,
     goal_reward_icon,
 )
@@ -72,7 +75,7 @@ print(f"wrote {overlay_path}")
 tiles = {
     "tile_s": composite(ice, load_scaled(os.path.join(gym_img, "stool.png"))),
     "tile_f": ice.copy(),
-    "tile_m": composite(ice, overlays[TILE_GLARE]),
+    "tile_m": composite(ice, overlays[TILE_MIRROR]),
     "tile_t": composite(ice, overlays[TILE_TREE]),
     "tile_h": composite(ice, load_scaled(os.path.join(gym_img, "hole.png"))),
     "tile_g": composite(ice, goal),

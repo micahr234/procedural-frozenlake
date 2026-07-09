@@ -98,10 +98,10 @@ def test_observation_space_uses_max_map_size() -> None:
     env = gym.make(
         PROCEDURAL_FROZENLAKE_ENV_ID,
         emit_map=True,
-        min_width=3,
-        max_width=5,
-        min_height=3,
-        max_height=6,
+        width=5,
+        height=6,
+        min_border=0,
+        max_border=1,
         map_seed=7,
     )
     try:
@@ -148,11 +148,10 @@ def test_q_star_matches_compute_q_table() -> None:
         env.close()
 
 
-def test_q_star_prefers_progress_with_zero_step_penalty() -> None:
-    """Default q_star_gamma discounting should beat wall-bumping when step_penalty is zero."""
+def test_q_star_prefers_progress() -> None:
+    """Default q_star_gamma discounting should beat wall-bumping."""
     env = ProceduralFrozenLakeEnv(
         fixed_map=["SFG"],
-        step_penalty=0.0,
         emit_q_star=True,
     )
     try:
@@ -293,10 +292,10 @@ def test_fog_of_war_clears_when_map_regenerates() -> None:
         fixed_map=None,
         fog_of_war=True,
         map_seed=7,
-        min_width=3,
-        max_width=3,
-        min_height=3,
-        max_height=3,
+        width=3,
+        height=3,
+        min_border=0,
+        max_border=0,
         hole_prob=0.0,
         min_hops=1,
     )
@@ -316,10 +315,10 @@ def test_canvas_is_always_max_size() -> None:
     env = gym.make(
         PROCEDURAL_FROZENLAKE_ENV_ID,
         emit_map=True,
-        min_width=3,
-        max_width=5,
-        min_height=3,
-        max_height=6,
+        width=5,
+        height=6,
+        min_border=0,
+        max_border=1,
         map_seed=7,
     )
     try:
@@ -334,7 +333,7 @@ def test_canvas_is_always_max_size() -> None:
         env.close()
 
 
-def test_obs_indexing_uses_max_width_stride() -> None:
+def test_obs_indexing_uses_width_stride() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
             "TSFFF",
@@ -355,7 +354,7 @@ def test_obs_indexing_uses_max_width_stride() -> None:
         env.close()
 
 
-def test_land_tiles_are_impassable() -> None:
+def test_tree_tiles_are_impassable() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
             "STFFF",
@@ -373,12 +372,12 @@ def test_land_tiles_are_impassable() -> None:
         env.close()
 
 
-def test_generated_maps_include_land() -> None:
+def test_generated_maps_include_trees() -> None:
     env = ProceduralFrozenLakeEnv(
-        min_width=3,
-        max_width=5,
-        min_height=3,
-        max_height=5,
+        width=5,
+        height=5,
+        min_border=0,
+        max_border=1,
         hole_prob=0.0,
         min_hops=1,
         map_seed=42,
@@ -455,10 +454,10 @@ def test_sleigh_pair_count_generation() -> None:
         sleigh_pair_count=1,
         hole_prob=0.0,
         min_hops=1,
-        min_width=4,
-        max_width=4,
-        min_height=4,
-        max_height=4,
+        width=4,
+        height=4,
+        min_border=0,
+        max_border=0,
         map_seed=99,
     )
     try:
@@ -519,16 +518,12 @@ def test_frozen_tiles_are_deterministic() -> None:
         env.close()
 
 
-def test_glare_prob_generation() -> None:
+def test_mirror_prob_generation() -> None:
     env = ProceduralFrozenLakeEnv(
-        glare_prob=1.0,
+        mirror_prob=1.0,
         hole_prob=0.0,
         min_hops=1,
-        min_width=4,
-        max_width=4,
-        min_height=4,
-        max_height=4,
-        map_seed=5,
+        map_seed=0,
     )
     try:
         env.reset(seed=0)
@@ -543,10 +538,8 @@ def test_tree_prob_generates_valid_map() -> None:
         tree_prob=0.3,
         hole_prob=0.0,
         min_hops=1,
-        min_width=6,
-        max_width=8,
-        min_height=6,
-        max_height=8,
+        width=8,
+        height=8,
         map_seed=12,
     )
     try:
@@ -557,7 +550,7 @@ def test_tree_prob_generates_valid_map() -> None:
         env.close()
 
 
-def test_fixed_map_with_glare_and_sleighs() -> None:
+def test_fixed_map_with_mirror_and_sleighs() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
             "SWFFG",
@@ -575,13 +568,11 @@ def test_fixed_map_with_glare_and_sleighs() -> None:
         env.close()
 
 
-def test_lake_has_jagged_land_edges() -> None:
-    """Generated lakes vary playable span per row and column (not uniform land strips)."""
+def test_lake_has_jagged_tree_edges() -> None:
+    """Generated lakes vary playable span per row and column (not uniform tree strips)."""
     env = ProceduralFrozenLakeEnv(
-        min_width=5,
-        max_width=7,
-        min_height=5,
-        max_height=7,
+        width=7,
+        height=7,
         hole_prob=0.0,
         min_hops=1,
         map_seed=123,
@@ -757,30 +748,89 @@ def test_elf_visible_on_sleigh_after_warp() -> None:
         env.close()
 
 
-def _lake_bounding_box(board: list[str]) -> tuple[int, int]:
-    rows = [r for r, row in enumerate(board) if any(ch != "T" for ch in row)]
-    cols = [c for c in range(len(board[0])) if any(row[c] != "T" for row in board)]
-    return cols[-1] - cols[0] + 1, rows[-1] - rows[0] + 1
+def test_shoreline_jaggedness_zero_is_rectangular() -> None:
+    env = ProceduralFrozenLakeEnv(
+        width=8,
+        height=8,
+        min_border=1,
+        max_border=1,
+        shoreline_jaggedness=0,
+        hole_prob=0.0,
+        min_hops=1,
+        map_seed=42,
+    )
+    try:
+        env.reset(seed=0)
+        board = env._gridmap or []
+        row_spans = [
+            (min(i for i, ch in enumerate(row) if ch != "T"),
+             max(i for i, ch in enumerate(row) if ch != "T"))
+            for row in board
+            if any(ch != "T" for ch in row)
+        ]
+        assert len({span for span in row_spans}) == 1
+    finally:
+        env.close()
 
 
-def test_lake_fits_inside_width_height_envelope() -> None:
-    """All playable tiles fit in a max_width × max_height envelope; the jagged
-    lake itself may be smaller than the sampled envelope."""
-    for seed in range(50):
+def test_shoreline_jaggedness_can_protrude_into_border() -> None:
+    found = False
+    for seed in range(200):
         env = ProceduralFrozenLakeEnv(
-            min_width=5,
-            max_width=7,
-            min_height=5,
-            max_height=7,
+            width=8,
+            height=8,
+            min_border=2,
+            max_border=2,
+            shoreline_jaggedness=2,
             hole_prob=0.0,
             min_hops=1,
             map_seed=seed,
         )
         try:
             env.reset(seed=0)
-            width, height = _lake_bounding_box(env._gridmap or [])
-            assert width <= 7
-            assert height <= 7
+            board = env._gridmap or []
+            border = 2
+            for r, row in enumerate(board):
+                for c, ch in enumerate(row):
+                    if ch != "T" and (r < border or r >= len(board) - border
+                                      or c < border or c >= len(row) - border):
+                        found = True
+                        break
+                if found:
+                    break
+        finally:
+            env.close()
+        if found:
+            break
+    assert found, "expected at least one peninsula into the border band"
+
+
+def test_playable_tiles_respect_sampled_border() -> None:
+    """All playable tiles lie inside the canvas inset defined by the sampled border."""
+    for seed in range(50):
+        env = ProceduralFrozenLakeEnv(
+            width=7,
+            height=7,
+            min_border=1,
+            max_border=2,
+            shoreline_jaggedness=0,
+            hole_prob=0.0,
+            min_hops=1,
+            map_seed=seed,
+            emit_map=True,
+        )
+        try:
+            _, info = env.reset(seed=0)
+            payload = info["map"]
+            assert isinstance(payload, dict)
+            border = payload["border"]
+            board = payload["board"]
+            for r, row in enumerate(board):
+                for c, ch in enumerate(row):
+                    if ch == "T":
+                        continue
+                    assert border <= r < len(board) - border
+                    assert border <= c < len(row) - border
         finally:
             env.close()
 
@@ -788,7 +838,6 @@ def test_lake_fits_inside_width_height_envelope() -> None:
 def test_q_star_is_zero_at_terminal_states() -> None:
     env = ProceduralFrozenLakeEnv(
         fixed_map={"board": ["SFG"], "rewards": {2: 0.7}},
-        step_penalty=-0.1,
         emit_q_star=True,
     )
     try:
@@ -798,12 +847,12 @@ def test_q_star_is_zero_at_terminal_states() -> None:
         env.step(2)
         _, reward, terminated, _, info = env.step(2)
         assert terminated
-        assert reward == pytest.approx(0.7 - 0.1)
+        assert reward == pytest.approx(0.7)
         assert np.allclose(info["q_star"], 0.0)
     finally:
         env.close()
 
-    env = ProceduralFrozenLakeEnv(fixed_map=["SFHG"], step_penalty=-0.1, emit_q_star=True)
+    env = ProceduralFrozenLakeEnv(fixed_map=["SFHG"], emit_q_star=True)
     try:
         env.reset(seed=0)
         assert np.allclose(env.compute_q_table()[2], 0.0)  # hole
@@ -812,7 +861,7 @@ def test_q_star_is_zero_at_terminal_states() -> None:
 
 
 def test_fog_slip_bump_reveals_actual_tile_not_intended() -> None:
-    """Slipping sideways on glare into a tree reveals the tree, not the intended tile."""
+    """Slipping sideways on mirror ice into a tree reveals the tree, not the intended tile."""
     env = ProceduralFrozenLakeEnv(
         fixed_map=[
             "STFG",
@@ -828,7 +877,7 @@ def test_fog_slip_bump_reveals_actual_tile_not_intended() -> None:
             env.reset(seed=seed)
             assert env._visited is not None
             env._visited[:] = False
-            env.unwrapped.s = 5  # glare at (1, 1)
+            env.unwrapped.s = 5  # mirror ice at (1, 1)
             env._mark_visited(5)
             obs, _, _, _, _ = env.step(2)  # intend RIGHT; may slip UP into tree
             if obs == 5:
@@ -842,39 +891,36 @@ def test_fog_slip_bump_reveals_actual_tile_not_intended() -> None:
 
 
 def test_p_matrix_carries_real_rewards() -> None:
-    """env.P rewards match exactly what step() pays (per-goal reward + step penalty)."""
+    """env.P rewards match exactly what step() pays (per-goal reward, else 0)."""
     env = ProceduralFrozenLakeEnv(
         fixed_map={"board": ["SFG"], "rewards": {2: 0.7}},
-        step_penalty=-0.1,
     )
     try:
         env.reset(seed=0)
-        assert env.P[0][2] == [(1.0, 1, pytest.approx(-0.1), False)]
-        assert env.P[1][2] == [(1.0, 2, pytest.approx(0.7 - 0.1), True)]
+        assert env.P[0][2] == [(1.0, 1, pytest.approx(0.0), False)]
+        assert env.P[1][2] == [(1.0, 2, pytest.approx(0.7), True)]
         _, reward, terminated, _, _ = env.step(2)
-        assert reward == pytest.approx(-0.1)
+        assert reward == pytest.approx(0.0)
         assert not terminated
         _, reward, terminated, _, _ = env.step(2)
-        assert reward == pytest.approx(0.7 - 0.1)
+        assert reward == pytest.approx(0.7)
         assert terminated
     finally:
         env.close()
 
 
-def test_q_star_includes_env_step_penalty() -> None:
-    """q_star is the optimal value of the live MDP: step_penalty from P is included."""
+def test_q_star_matches_discounted_goal_path() -> None:
+    """q_star is the optimal value of the live MDP over env.P."""
     env = ProceduralFrozenLakeEnv(
         fixed_map=["SFG"],
-        step_penalty=-0.5,
         emit_q_star=True,
     )
     try:
         env.reset(seed=0)
         q = env.compute_q_table()
-        # From F: goal reward 1.0 plus step penalty -0.5. From S: another -0.5,
-        # with the final +0.5 discounted one step.
-        assert q[1, 2] == pytest.approx(0.5)
-        assert q[0, 2] == pytest.approx(-0.5 + 0.999 * 0.5)
+        # From F: goal reward 1.0. From S: one discounted step to F's value.
+        assert q[1, 2] == pytest.approx(1.0)
+        assert q[0, 2] == pytest.approx(0.999 * 1.0)
         assert env.q_star_gamma == pytest.approx(0.999)
     finally:
         env.close()
@@ -889,7 +935,7 @@ def test_probability_params_out_of_range_raise() -> None:
     for kwargs in (
         {"hole_prob": 1.5},
         {"tree_prob": -0.1},
-        {"glare_prob": 2.0},
+        {"mirror_prob": 2.0},
         {"slippery_success_rate": 1.1},
         {"start_pos_prob": -0.5},
         {"goal_pos_prob": 7.0},
@@ -898,13 +944,32 @@ def test_probability_params_out_of_range_raise() -> None:
             ProceduralFrozenLakeEnv(**kwargs)
 
 
-def test_width_height_bounds_validated() -> None:
+def test_info_excludes_prob() -> None:
+    env = ProceduralFrozenLakeEnv(map_seed=0, emit_map=True)
+    try:
+        _, reset_info = env.reset(seed=0)
+        assert "prob" not in reset_info
+        assert isinstance(reset_info["map"], dict)
+        _, _, _, _, step_info = env.step(0)
+        assert "prob" not in step_info
+    finally:
+        env.close()
+
+
+def test_shoreline_jaggedness_negative_raises() -> None:
+    with pytest.raises(ValueError, match="shoreline_jaggedness"):
+        ProceduralFrozenLakeEnv(shoreline_jaggedness=-1)
+
+
+def test_border_bounds_validated() -> None:
     with pytest.raises(ValueError, match="min <= max"):
-        ProceduralFrozenLakeEnv(min_width=9, max_width=8)
-    with pytest.raises(ValueError, match="min <= max"):
-        ProceduralFrozenLakeEnv(min_height=9, max_height=8)
+        ProceduralFrozenLakeEnv(min_border=3, max_border=2)
+    with pytest.raises(ValueError, match=">= 0"):
+        ProceduralFrozenLakeEnv(min_border=-1)
+    with pytest.raises(ValueError, match="2\\*max_border"):
+        ProceduralFrozenLakeEnv(width=4, height=4, max_border=2)
     with pytest.raises(ValueError, match=">= 1"):
-        ProceduralFrozenLakeEnv(min_width=0)
+        ProceduralFrozenLakeEnv(width=0)
 
 
 def test_positions_with_fixed_map_raise() -> None:
@@ -921,15 +986,13 @@ def test_positions_with_fixed_map_raise() -> None:
 def test_unplaceable_explicit_positions_raise_with_reason() -> None:
     env = ProceduralFrozenLakeEnv(start_pos=27, goal_pos=27, map_seed=0, max_tries=50)
     try:
-        with pytest.raises(RuntimeError, match="goal_pos 27 is not on playable lake ice"):
+        with pytest.raises(RuntimeError, match="is not on playable lake ice"):
             env.reset(seed=0)
     finally:
         env.close()
 
 
 def test_permutations_relabel_obs_and_actions() -> None:
-    import json
-
     base = ProceduralFrozenLakeEnv(map_seed=5, emit_map=True, emit_q_star=True)
     perm = ProceduralFrozenLakeEnv(
         map_seed=5,
@@ -941,8 +1004,8 @@ def test_permutations_relabel_obs_and_actions() -> None:
     try:
         base_obs, base_info = base.reset(seed=3)
         perm_obs, perm_info = perm.reset(seed=3)
-        base_map = json.loads(base_info["map"])
-        perm_map = json.loads(perm_info["map"])
+        base_map = base_info["map"]
+        perm_map = perm_info["map"]
         assert base_map["board"] == perm_map["board"]
         obs_perm = perm_map["obs_permutation"]
         act_perm = perm_map["action_permutation"]
@@ -966,16 +1029,14 @@ def test_permutations_relabel_obs_and_actions() -> None:
 
 
 def test_permutations_resample_on_map_regeneration() -> None:
-    import json
-
     env = ProceduralFrozenLakeEnv(
         map_seed=5, emit_map=True, permute_obs=True, permute_actions=True
     )
     try:
         _, first = env.reset(seed=0)
         _, second = env.reset(seed=0, options={"regenerate_map": True})
-        first_map = json.loads(first["map"])
-        second_map = json.loads(second["map"])
+        first_map = first["map"]
+        second_map = second["map"]
         assert (
             first_map["obs_permutation"] != second_map["obs_permutation"]
             or first_map["action_permutation"] != second_map["action_permutation"]
@@ -985,13 +1046,79 @@ def test_permutations_resample_on_map_regeneration() -> None:
 
 
 def test_map_info_has_no_permutations_when_disabled() -> None:
-    import json
-
     env = ProceduralFrozenLakeEnv(map_seed=5, emit_map=True)
     try:
         _, info = env.reset(seed=0)
-        map_info = json.loads(info["map"])
+        map_info = info["map"]
+        assert isinstance(map_info, dict)
         assert "obs_permutation" not in map_info
         assert "action_permutation" not in map_info
+        assert all(isinstance(k, int) for k in map_info["rewards"])
+    finally:
+        env.close()
+
+
+def test_flat_index_start_and_goal_pos() -> None:
+    """start_pos / goal_pos use canonical flat indices (row * width + col)."""
+    env = ProceduralFrozenLakeEnv(
+        width=5,
+        height=5,
+        min_border=0,
+        max_border=0,
+        shoreline_jaggedness=0,
+        hole_prob=0.0,
+        min_hops=1,
+        start_pos=0,  # (0, 0)
+        goal_pos=24,  # (4, 4)
+        map_seed=0,
+        emit_map=True,
+    )
+    try:
+        _, info = env.reset(seed=0)
+        board = info["map"]["board"]
+        assert board[0][0] == "S"
+        assert board[4][4] == "G"
+    finally:
+        env.close()
+
+    with pytest.raises(ValueError, match="canonical flat|list of ints"):
+        ProceduralFrozenLakeEnv(start_pos=(0, 0), map_seed=0)  # type: ignore[arg-type]
+
+
+def test_goal_reward_bounds_must_be_ordered() -> None:
+    with pytest.raises(ValueError, match="goal_reward_low"):
+        ProceduralFrozenLakeEnv(goal_reward_low=2.0, goal_reward_high=1.0)
+
+
+def test_unknown_reset_option_raises() -> None:
+    env = ProceduralFrozenLakeEnv(map_seed=0)
+    try:
+        with pytest.raises(ValueError, match="Unsupported reset option"):
+            env.reset(options={"start_pos": 0})
+    finally:
+        env.close()
+
+
+def test_zero_start_pos_prob_fails_clearly() -> None:
+    env = ProceduralFrozenLakeEnv(
+        start_pos_prob=0.0,
+        hole_prob=0.0,
+        min_hops=1,
+        map_seed=0,
+        max_tries=20,
+    )
+    try:
+        with pytest.raises(RuntimeError, match="start_pos_prob|zero start|no start"):
+            env.reset(seed=0)
+    finally:
+        env.close()
+
+
+def test_gym_make_registers_time_limit() -> None:
+    env = gym.make(PROCEDURAL_FROZENLAKE_ENV_ID, map_seed=0)
+    try:
+        assert env.spec is not None
+        assert env.spec.max_episode_steps == 100
+        assert env.spec.nondeterministic is True
     finally:
         env.close()
