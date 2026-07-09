@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Minimum Python version is now 3.13 (`requires-python = ">=3.13"`); CI, publish, and `scripts/install.sh` use Python 3.13.
 - `Procedural-FrozenLake-v1` is now registered with `max_episode_steps=200` (matching `FrozenLake8x8-v1`), so `gym.make` wraps it in a `TimeLimit` that truncates episodes at 200 steps. Override with `gym.make(..., max_episode_steps=…)`.
 
 ## [1.0.0] - 2026-07-08

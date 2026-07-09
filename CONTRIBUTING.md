@@ -10,7 +10,7 @@ cd procedural-frozenlake
 source scripts/install.sh
 ```
 
-This creates a Python 3.12 virtual environment and installs the package in editable mode with dev dependencies.
+This creates a Python 3.13 virtual environment and installs the package in editable mode with dev dependencies.
 
 Notebooks under [`examples/`](examples/) are committed **without** outputs. The workspace sets `"notebook.transientOutputs": true` in [`.vscode/settings.json`](.vscode/settings.json), so Cursor/VS Code does not write cell outputs to disk when you run and save a notebook here.
 
@@ -27,7 +27,7 @@ Tests live under [`tests/`](tests/). If you add a feature, add or extend a test 
 
 ## Code style
 
-- Python 3.12+, type-annotated throughout.
+- Python 3.13+, type-annotated throughout.
 - Follow existing patterns in `src/procedural_frozenlake/`.
 - Avoid silent fallbacks — raise clear errors when preconditions are not met.
 - Comments should explain *why*, not *what*.
