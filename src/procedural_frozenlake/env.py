@@ -33,7 +33,10 @@ from procedural_frozenlake.tiles import (
     TILE_START,
     TILE_TREE,
 )
-from procedural_frozenlake.value_iteration import solve_tabular_mdp
+from procedural_frozenlake.value_iteration import (
+    solve_tabular_mdp,
+    solve_tabular_mdp_finite_horizon,
+)
 
 PROCEDURAL_FROZENLAKE_ENV_ID = "Procedural-FrozenLake-v1"
 
@@ -88,8 +91,12 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     reward. The transition matrix ``P`` carries those exact rewards, so planning
     directly from ``P`` matches live behavior. When ``emit_q_star`` is True,
     :meth:`compute_q_table` solves ``P`` with discount ``q_star_gamma`` (default
-    ``0.999``), so Q\\* is the optimal value of the live MDP and prefers shorter
-    paths. Terminal states (goal/hole) and tree states have Q-values of zero.
+    ``1.0``), so Q\\* is the undiscounted optimal value of the live MDP. Set
+    ``q_star_gamma < 1`` to prefer shorter paths. Pass ``q_star_horizon=H`` to
+    use finite-horizon Q\\* for the current remaining steps instead of
+    infinite-horizon value iteration; set ``H`` to match ``max_episode_steps``
+    when using the registered ``TimeLimit`` wrapper.
+    Terminal states (goal/hole) and tree states have Q-values of zero.
     ``emit_q_star`` puts a length-4 vector in ``info["q_star"]`` for the current
     state (ordered by external action id when ``permute_actions`` is on).
 
@@ -150,7 +157,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         # Supervision signals in info
         emit_map: bool = False,
         emit_q_star: bool = False,
-        q_star_gamma: float = 0.999,
+        q_star_gamma: float = 1.0,
+        q_star_horizon: int | None = None,
         # Observation/action relabeling
         permute_obs: bool = False,
         permute_actions: bool = False,
@@ -193,6 +201,13 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             raise ValueError(f"sleigh_pair_count must be >= 0, got {sleigh_pair_count}.")
         if not 0.0 < float(q_star_gamma) <= 1.0:
             raise ValueError(f"q_star_gamma must be in (0, 1], got {q_star_gamma!r}.")
+        if q_star_horizon is not None:
+            horizon = int(q_star_horizon)
+            if horizon <= 0:
+                raise ValueError(
+                    f"q_star_horizon must be a positive int or None, got {q_star_horizon!r}."
+                )
+            q_star_horizon = horizon
         if fixed_map is not None and any(
             v is not None for v in (start_pos, start_pos_prob, goal_pos, goal_pos_prob)
         ):
@@ -209,6 +224,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._goal_reward_high = hi
         self.reward_range = (min(0.0, lo), max(0.0, hi))
         self.q_star_gamma = float(q_star_gamma)
+        self.q_star_horizon = q_star_horizon
+        self._remaining_steps = int(q_star_horizon) if q_star_horizon is not None else 0
         self.emit_q_star = bool(emit_q_star)
         self.emit_map = bool(emit_map)
         self._has_fixed_map = fixed_map is not None
@@ -623,6 +640,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self,
         max_iter: int = 10_000,
         tolerance: float = 1e-10,
+        remaining: int | None = None,
     ) -> np.ndarray:
         self._require_map_initialized()
         n_s = int(self.nrow * self.ncol)
@@ -635,20 +653,48 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         }
         # P carries the exact env rewards (per-goal reward, else 0), so Q*
         # is the true optimal value of the live MDP, discounted by q_star_gamma.
-        return solve_tabular_mdp(
-            P=self.P,
-            n_states=n_s,
-            n_actions=4,
-            gamma=float(self.q_star_gamma),
-            terminal_states=terminal_states,
-            max_iter=max_iter,
-            tolerance=tolerance,
-        )
+        if self.q_star_horizon is None:
+            if remaining is not None:
+                raise ValueError(
+                    "compute_q_table(remaining=...) requires q_star_horizon to be set."
+                )
+            return solve_tabular_mdp(
+                P=self.P,
+                n_states=n_s,
+                n_actions=4,
+                gamma=float(self.q_star_gamma),
+                terminal_states=terminal_states,
+                max_iter=max_iter,
+                tolerance=tolerance,
+            )
+        q = self._ensure_finite_q_table(terminal_states)
+        h = self._remaining_steps if remaining is None else int(remaining)
+        if h < 0 or h > int(self.q_star_horizon):
+            raise ValueError(
+                f"remaining must be in [0, {self.q_star_horizon}], got {remaining!r}."
+            )
+        return np.asarray(q[h], dtype=np.float64).copy()
+
+    def _ensure_finite_q_table(self, terminal_states: set[int]) -> np.ndarray:
+        assert self.q_star_horizon is not None
+        if self._q_table is None:
+            self._q_table = solve_tabular_mdp_finite_horizon(
+                P=self.P,
+                n_states=int(self.nrow * self.ncol),
+                n_actions=4,
+                gamma=float(self.q_star_gamma),
+                horizon=int(self.q_star_horizon),
+                terminal_states=terminal_states,
+            )
+        return self._q_table
 
     def _q_star_for_obs(self, obs: int) -> np.ndarray:
-        if self._q_table is None:
-            self._q_table = self.compute_q_table()
-        return np.asarray(self._q_table[int(obs)], dtype=np.float64).copy()
+        if self.q_star_horizon is None:
+            if self._q_table is None:
+                self._q_table = self.compute_q_table()
+            return np.asarray(self._q_table[int(obs)], dtype=np.float64).copy()
+        q = self.compute_q_table()
+        return np.asarray(q[int(obs)], dtype=np.float64).copy()
 
     def _clear_fog(self) -> None:
         if not self.fog_of_war:
@@ -953,6 +999,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             self._ensure_map_initialized()
         obs, _ = super().reset(seed=seed, options=None)
         obs = int(obs)
+        if self.q_star_horizon is not None:
+            self._remaining_steps = int(self.q_star_horizon)
         self._ensure_fog_initialized()
         self._mark_visited(obs)
         info: dict[str, Any] = {}
@@ -980,6 +1028,8 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
             self.render()
 
         obs = int(new_state)
+        if self.q_star_horizon is not None:
+            self._remaining_steps = max(0, self._remaining_steps - 1)
         self._mark_visited(obs)
         if obs == old_obs:
             move_dir = self._transition_move_dirs[old_obs][action][idx]

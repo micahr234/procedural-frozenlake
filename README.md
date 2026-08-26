@@ -130,7 +130,8 @@ This env follows the conventions of Gymnasium's [FrozenLake](https://gymnasium.f
 |-----------|---------|-------------|
 | `emit_map` | `False` | Inject map layout dict in `info["map"]` on every `reset()` and `step()` |
 | `emit_q_star` | `False` | Inject optimal Q-values for the current state in `info["q_star"]` (shape `(4,)`; zero at terminal states) |
-| `q_star_gamma` | `0.999` | Discount for Q\* value iteration over `env.P` |
+| `q_star_gamma` | `1.0` | Discount for Q\* value iteration over `env.P` (`< 1` prefers shorter paths) |
+| `q_star_horizon` | `None` | If set, `info["q_star"]` is finite-horizon Q\* for the **remaining** steps (reset starts at this value and counts down). Match `max_episode_steps` when using the registered `TimeLimit` wrapper. `None` keeps infinite-horizon Q\* |
 
 **Relabeling**
 

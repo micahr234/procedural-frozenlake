@@ -149,9 +149,10 @@ def test_q_star_matches_compute_q_table() -> None:
 
 
 def test_q_star_prefers_progress() -> None:
-    """Default q_star_gamma discounting should beat wall-bumping."""
+    """q_star_gamma < 1 should beat wall-bumping."""
     env = ProceduralFrozenLakeEnv(
         fixed_map=["SFG"],
+        q_star_gamma=0.999,
         emit_q_star=True,
     )
     try:
@@ -185,6 +186,120 @@ def test_q_star_gamma_out_of_range_raises() -> None:
         ProceduralFrozenLakeEnv(q_star_gamma=0.0)
     with pytest.raises(ValueError, match="q_star_gamma"):
         ProceduralFrozenLakeEnv(q_star_gamma=1.5)
+
+
+def test_q_star_horizon_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="q_star_horizon"):
+        ProceduralFrozenLakeEnv(q_star_horizon=0)
+    with pytest.raises(ValueError, match="q_star_horizon"):
+        ProceduralFrozenLakeEnv(q_star_horizon=-1)
+
+
+def test_q_star_horizon_too_short_cannot_reach_goal() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=["SFG"],
+        q_star_gamma=1.0,
+        q_star_horizon=1,
+        emit_q_star=True,
+    )
+    try:
+        obs, info = env.reset(seed=0)
+        assert obs == 0
+        q = env.compute_q_table()
+        assert q[0, 2] == pytest.approx(0.0)
+        assert info["q_star"][2] == pytest.approx(0.0)
+        assert q[1, 2] == pytest.approx(1.0)
+    finally:
+        env.close()
+
+
+def test_q_star_horizon_long_enough_reaches_goal() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=["SFG"],
+        q_star_gamma=1.0,
+        q_star_horizon=2,
+        emit_q_star=True,
+    )
+    try:
+        obs, info = env.reset(seed=0)
+        assert obs == 0
+        q = env.compute_q_table()
+        assert q[0, 2] == pytest.approx(1.0)
+        assert info["q_star"][2] == pytest.approx(1.0)
+        assert q[1, 2] == pytest.approx(1.0)
+    finally:
+        env.close()
+
+
+def test_q_star_horizon_remaining_decays() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=["SFG"],
+        q_star_gamma=1.0,
+        q_star_horizon=2,
+        emit_q_star=True,
+    )
+    try:
+        obs, info = env.reset(seed=0)
+        assert obs == 0
+        assert np.allclose(info["q_star"], env.compute_q_table()[obs])
+        assert env.compute_q_table()[0, 2] == pytest.approx(1.0)
+
+        obs, _, _, _, info = env.step(2)
+        assert obs == 1
+        assert env._remaining_steps == 1
+        assert np.allclose(info["q_star"], env.compute_q_table()[obs])
+        assert info["q_star"][2] == pytest.approx(1.0)
+        assert env.compute_q_table(remaining=1)[0, 2] == pytest.approx(0.0)
+        assert env.compute_q_table(remaining=1)[1, 2] == pytest.approx(1.0)
+    finally:
+        env.close()
+
+
+def test_q_star_horizon_zero_remaining_is_zero() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map=["SFG"],
+        q_star_gamma=1.0,
+        q_star_horizon=1,
+        emit_q_star=True,
+    )
+    try:
+        env.reset(seed=0)
+        obs, _, _, _, info = env.step(2)
+        assert obs == 1
+        assert env._remaining_steps == 0
+        assert np.allclose(info["q_star"], 0.0)
+        assert np.allclose(env.compute_q_table()[obs], 0.0)
+    finally:
+        env.close()
+
+
+def test_q_star_horizon_zero_at_terminal() -> None:
+    env = ProceduralFrozenLakeEnv(
+        fixed_map={"board": ["SFG"], "rewards": {2: 0.7}},
+        q_star_gamma=1.0,
+        q_star_horizon=3,
+        emit_q_star=True,
+    )
+    try:
+        env.reset(seed=0)
+        env.step(2)
+        _, reward, terminated, _, info = env.step(2)
+        assert terminated
+        assert reward == pytest.approx(0.7)
+        assert np.allclose(info["q_star"], 0.0)
+        assert np.allclose(env.compute_q_table()[2], 0.0)
+    finally:
+        env.close()
+
+
+def test_compute_q_table_remaining_requires_horizon() -> None:
+    env = ProceduralFrozenLakeEnv(fixed_map=["SFG"])
+    try:
+        env.reset(seed=0)
+        with pytest.raises(ValueError, match="q_star_horizon"):
+            env.compute_q_table(remaining=1)
+    finally:
+        env.close()
 
 
 def test_same_map_is_reused_without_regenerate_option() -> None:
@@ -927,10 +1042,10 @@ def test_q_star_matches_discounted_goal_path() -> None:
     try:
         env.reset(seed=0)
         q = env.compute_q_table()
-        # From F: goal reward 1.0. From S: one discounted step to F's value.
+        # From F: goal reward 1.0. From S: one undiscounted step to F's value.
         assert q[1, 2] == pytest.approx(1.0)
-        assert q[0, 2] == pytest.approx(0.999 * 1.0)
-        assert env.q_star_gamma == pytest.approx(0.999)
+        assert q[0, 2] == pytest.approx(1.0)
+        assert env.q_star_gamma == pytest.approx(1.0)
     finally:
         env.close()
 

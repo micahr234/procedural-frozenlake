@@ -5,7 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `q_star_horizon` constructor parameter (default `None`): when set, `info["q_star"]` is finite-horizon Q\* for the current remaining steps instead of infinite-horizon value iteration. Remaining time resets to the horizon on `reset()` and counts down on each `step()`. Match this to `max_episode_steps` when using the registered `TimeLimit` wrapper.
+
 ### Changed
+- `q_star_gamma` now defaults to `1.0` (undiscounted). Set it below `1` to prefer shorter paths.
 - Minimum Python version is now 3.13 (`requires-python = ">=3.13"`); CI, publish, and `scripts/install.sh` use Python 3.13.
 - `Procedural-FrozenLake-v1` is now registered with `max_episode_steps=200` (matching `FrozenLake8x8-v1`), so `gym.make` wraps it in a `TimeLimit` that truncates episodes at 200 steps. Override with `gym.make(..., max_episode_steps=…)`.
 
