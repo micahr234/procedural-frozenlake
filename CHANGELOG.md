@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `info["map"]` is a new dict on every `reset()` and `step()`, including nested `rewards` and `sleighs`. Editing a returned map no longer changes later infos or the env's stored layout.
+
 ### Added
 - `q_star_horizon` constructor parameter (default `None`): when set, `info["q_star"]` is finite-horizon Q\* for the current remaining steps instead of infinite-horizon value iteration. Remaining time resets to the horizon on `reset()` and counts down on each `step()`. Match this to `max_episode_steps` when using the registered `TimeLimit` wrapper.
 

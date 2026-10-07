@@ -64,6 +64,27 @@ def test_map_info_emitted_every_reset_and_step() -> None:
         env.close()
 
 
+def test_map_info_is_a_fresh_copy_each_call() -> None:
+    env = ProceduralFrozenLakeEnv(map_seed=1, emit_map=True)
+    try:
+        _, first = env.reset(seed=1)
+        _, _, _, _, step_info = env.step(0)
+        assert first["map"] is not step_info["map"]
+        assert first["map"]["rewards"] is not step_info["map"]["rewards"]
+        assert first["map"]["sleighs"] is not step_info["map"]["sleighs"]
+        assert first["map"]["board"] is not step_info["map"]["board"]
+
+        first["map"]["board"][0] = "mutated"
+        first["map"]["rewards"][-1] = -1.0
+        first["map"]["sleighs"]["pairs"].append([0, 1])
+
+        _, _, _, _, later = env.step(0)
+        assert later["map"] == step_info["map"]
+        assert later["map"]["board"][0] != "mutated"
+    finally:
+        env.close()
+
+
 def test_can_regenerate_map_on_reset() -> None:
     env = gym.make(
         PROCEDURAL_FROZENLAKE_ENV_ID,

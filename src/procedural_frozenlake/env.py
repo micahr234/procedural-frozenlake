@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import random
 from collections.abc import Mapping
 from os import path
@@ -100,10 +101,11 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
     ``emit_q_star`` puts a length-4 vector in ``info["q_star"]`` for the current
     state (ordered by external action id when ``permute_actions`` is on).
 
-    When ``emit_map`` is True, every :meth:`reset` and :meth:`step` puts a **dict** in
-    ``info["map"]`` that is a blueprint for the current layout: ``board``, ``rewards``
+    When ``emit_map`` is True, every :meth:`reset` and :meth:`step` puts a **fresh
+    copy** of the blueprint dict in ``info["map"]``: ``board``, ``rewards``
     (int keys → float), ``sleighs``, and — when enabled — ``obs_permutation`` /
-    ``action_permutation``. Pass that dict back as ``fixed_map`` to rebuild the same
+    ``action_permutation``. Editing that dict does not change later steps or the
+    env's stored layout. Pass a copy back as ``fixed_map`` to rebuild the same
     map (including permutations).
 
     Positions (``start_pos`` / ``goal_pos``) and map reward keys use **canonical flat
@@ -525,6 +527,14 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         if self._action_perm is not None:
             info["action_permutation"] = list(self._action_perm)
         return info
+
+    def _copy_map_info(self) -> dict[str, Any]:
+        """Return a fresh blueprint so a caller can keep or edit one step's info."""
+        if self._map_info is None:
+            raise RuntimeError(
+                "ProceduralFrozenLakeEnv map is not initialized; call reset() before using the map."
+            )
+        return copy.deepcopy(self._map_info)
 
     @classmethod
     def goal_states_from_gridmap(
@@ -1005,7 +1015,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         self._mark_visited(obs)
         info: dict[str, Any] = {}
         if self.emit_map:
-            info["map"] = self._map_info
+            info["map"] = self._copy_map_info()
         if self.emit_q_star:
             info["q_star"] = self._emit_q_star_vector(obs)
         return self._external_obs(obs), info
@@ -1042,7 +1052,7 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         reward = float(reward)
         info: dict[str, Any] = {}
         if self.emit_map:
-            info["map"] = self._map_info
+            info["map"] = self._copy_map_info()
         if self.emit_q_star:
             info["q_star"] = self._emit_q_star_vector(obs)
         return self._external_obs(obs), reward, bool(terminated), False, info
