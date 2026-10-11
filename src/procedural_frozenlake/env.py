@@ -767,6 +767,9 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         if self._fog_font_obj is None:
             import pygame  # type: ignore[import-untyped]
 
+            # Gymnasium 1.4 only calls pygame.display.init(); the font module
+            # still needs its own init before SysFont.
+            pygame.font.init()
             self._fog_font_obj = pygame.font.SysFont(
                 "dejavusans", max(16, self.cell_size[1] // 2)
             )
@@ -876,9 +879,11 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
         if self._goal_icons is not None and self._goal_icons_key == key:
             return self._goal_icons
         import pygame  # type: ignore[import-untyped]
-        from gymnasium.envs.toy_text import frozen_lake
 
-        goal_path = path.join(path.dirname(frozen_lake.__file__), "img", "goal.png")
+        # Gymnasium 1.4 replaced this present with goal_flag.png. The reward
+        # bow tint is keyed to the present's orange ribbon, so the sprite ships
+        # with this package.
+        goal_path = path.join(path.dirname(__file__), "img", "goal.png")
         raw = pygame.image.load(goal_path)
         # No display may exist in rgb_array mode, so convert to a per-pixel
         # alpha surface manually instead of convert_alpha().
@@ -923,18 +928,20 @@ class ProceduralFrozenLakeEnv(FrozenLakeEnv):
                     if idx is not None:
                         self.window_surface.blit(badges[idx], pos)
 
-        # The parent render draws the elf before these icons are blitted, so an
+        # The parent render draws the agent before these icons are blitted, so an
         # agent standing on a special tile (e.g. just warped onto a sleigh)
-        # or on a goal would be hidden underneath its overlay. Redraw it on top.
+        # or on a goal would be hidden underneath its overlay. Redraw it on top,
+        # centered the same way FrozenLakeEnv paints agent_img.
         bot_row, bot_col = self._obs_to_row_col(int(self.s))
         bot_ch = self._decode_grid_char(self.desc[bot_row, bot_col])
-        if bot_ch in icons or bot_ch == TILE_GOAL:
-            last_action = 1 if self.lastaction is None else int(self.lastaction)
-            elf_images = self.elf_images
-            assert elf_images is not None
-            elf_img = elf_images[last_action]
-            pos = (bot_col * self.cell_size[0], bot_row * self.cell_size[1])
-            self.window_surface.blit(elf_img, pos)
+        agent_img = self.agent_img
+        if agent_img is not None and (bot_ch in icons or bot_ch == TILE_GOAL):
+            agent_w, agent_h = agent_img.get_size()
+            pos = (
+                bot_col * self.cell_size[0] + (self.cell_size[0] - agent_w) / 2,
+                bot_row * self.cell_size[1] + (self.cell_size[1] - agent_h) / 2,
+            )
+            self.window_surface.blit(agent_img, pos)
 
     def _render_gui(self, mode: str) -> np.ndarray | None:
         original_desc = self.desc

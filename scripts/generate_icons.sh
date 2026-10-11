@@ -59,10 +59,11 @@ def composite(*layers: pygame.Surface) -> pygame.Surface:
     return surface
 
 
-ice = load_scaled(os.path.join(gym_img, "ice.png"))
+ice = load_scaled(os.path.join(gym_img, "tile_ice.png"))
 sleigh_badge = build_sleigh_pair_badges(CELL_SIZE, 1)[0]
 
-goal_raw = pygame.image.load(os.path.join(gym_img, "goal.png"))
+# Packaged present; Gymnasium 1.4 no longer ships goal.png.
+goal_raw = pygame.image.load(os.path.join(img_dir, "goal.png"))
 goal_native = pygame.Surface(goal_raw.get_size(), pygame.SRCALPHA)
 goal_native.blit(goal_raw, (0, 0))
 goal = goal_reward_icon(goal_native, 0.75, "1.00", CELL_SIZE)
@@ -77,7 +78,7 @@ tiles = {
     "tile_f": ice.copy(),
     "tile_m": composite(ice, overlays[TILE_MIRROR]),
     "tile_t": composite(ice, overlays[TILE_TREE]),
-    "tile_h": composite(ice, load_scaled(os.path.join(gym_img, "hole.png"))),
+    "tile_h": composite(ice, load_scaled(os.path.join(gym_img, "tile_hole.png"))),
     "tile_g": composite(ice, goal),
     "tile_w": composite(ice, overlays[TILE_SLEIGH], sleigh_badge),
 }

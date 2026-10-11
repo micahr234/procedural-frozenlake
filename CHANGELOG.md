@@ -13,7 +13,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - `q_star_gamma` now defaults to `1.0` (undiscounted). Set it below `1` to prefer shorter paths.
-- Minimum Python version is now 3.13 (`requires-python = ">=3.13"`); CI, publish, and `scripts/install.sh` use Python 3.13.
+- Minimum Python version is now 3.15 (`requires-python = ">=3.15"`). CI, publish, and `scripts/install.sh` use the free-threaded build (`3.15t`).
+- Requires Gymnasium >= 1.4.0. Goal reward icons load the packaged present (`img/goal.png`); Gymnasium 1.4 removed `toy_text/img/goal.png`. The agent drawn on top of a special tile or goal is Gymnasium's `agent_img`.
 - `Procedural-FrozenLake-v1` is now registered with `max_episode_steps=200` (matching `FrozenLake8x8-v1`), so `gym.make` wraps it in a `TimeLimit` that truncates episodes at 200 steps. Override with `gym.make(..., max_episode_steps=…)`.
 
 ## [1.0.0] - 2026-07-08
